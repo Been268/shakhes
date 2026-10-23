@@ -2081,8 +2081,16 @@ async function doLogin(){
       'auth/invalid-email':   'ایمیل معتبر نیست',
       'auth/too-many-requests':'تعداد تلاش زیاد است، کمی صبر کنید',
       'auth/invalid-credential': 'ایمیل یا رمز اشتباه است',
+      'auth/user-disabled': 'این حساب غیرفعال شده است؛ با مدیر سامانه تماس بگیرید.',
+      'auth/operation-not-allowed': 'ورود با ایمیل و رمز در تنظیمات Firebase فعال نیست.',
+      'auth/unauthorized-domain': 'دامنهٔ سایت در دامنه‌های مجاز Firebase ثبت نشده است.',
+      'auth/network-request-failed': 'ارتباط با Firebase برقرار نشد؛ اینترنت یا VPN را بررسی کنید.',
+      'auth/invalid-api-key': 'کلید Firebase نامعتبر است؛ پیکربندی پروژه باید بررسی شود.',
+      'auth/app-not-authorized': 'این برنامه برای پروژهٔ Firebase مجاز نیست.',
     };
-    showLoginError(msgs[e.code] || 'ورود انجام نشد. لطفاً تنظیمات دسترسی حساب را بررسی کنید.');
+    // Keep the error code visible when Firebase returns an unrecognized error;
+    // never show or log the submitted email or password.
+    showLoginError(msgs[e.code] || `ورود انجام نشد (${e.code || 'خطای ناشناخته'}). لطفاً همین کد را برای پشتیبانی بفرستید؛ رمز را ارسال نکنید.`);
   } finally {
     if(btn){ btn.disabled = false; btn.textContent = 'ورود'; }
   }
