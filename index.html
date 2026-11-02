@@ -5,58 +5,156 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>املاک شاخص</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23161b22'/%3E%3Cpath d='M18 48 50 20l32 28v34H58V61H42v21H18z' fill='%23e8a838'/%3E%3C/svg%3E">
-<!-- Firebase SDKs (compat version - globally accessible) -->
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-  const firebaseConfig = {
-    apiKey:            "AIzaSyAJuVcqtxsMD_NizSRCBLIXC6ffZR_SniI",
-    authDomain:        "syatem-amlak.firebaseapp.com",
-    projectId:         "syatem-amlak",
-    storageBucket:     "syatem-amlak.firebasestorage.app",
-    messagingSenderId: "188773423996",
-    appId:             "1:188773423996:web:c4f61dabd222cca5bf62f9",
-    measurementId:     "G-0KV5NWDRC3"
+  const SUPABASE_URL = 'https://efafbvagqynfxzfcitax.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_nj1yxl0_15v4BeviPBJQhg_tuWB8ap0';
+  const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth: { persistSession:true, autoRefreshToken:true, detectSessionInUrl:true }
+  });
+
+  function unwrap(result){ if(result.error) throw result.error; return result.data; }
+  function profileData(row){ return row ? {...row, joinDate:row.join_date} : undefined; }
+  function profileFields(data){
+    const out={};
+    for(const key of ['fullname','phone']) if(data[key] !== undefined) out[key]=data[key];
+    return out;
+  }
+  async function fetchAll(query){
+    const rows=[]; const pageSize=500;
+    for(let start=0; ; start+=pageSize){
+      const {data,error}=await query.range(start,start+pageSize-1);
+      if(error) throw error;
+      rows.push(...(data||[]));
+      if(!data || data.length<pageSize) break;
+    }
+    return rows;
+  }
+  function snapshot(id,value){ return {id,exists:value!==undefined&&value!==null,data:()=>value?{...value}:undefined}; }
+  function parsePath(path){ return String(path).split('/').filter(Boolean); }
+  function profileRef(id){
+    return {
+      kind:'profile',id,
+      get:async()=>{
+        const row=unwrap(await _supabase.from('profiles').select('id,email,fullname,username,phone,role,status,join_date').eq('id',id).maybeSingle());
+        return snapshot(id,profileData(row));
+      },
+      set:async()=>{ throw new Error('پروفایل فقط از مسیر ثبت‌نام و تنظیمات امن تغییر می‌کند.'); },
+      update:async patch=>{
+        if(Object.prototype.hasOwnProperty.call(patch,'role')) throw new Error('تغییر نقش فقط از مسیر امن مدیریت انجام می‌شود.');
+        if(Object.prototype.hasOwnProperty.call(patch,'status')){
+          unwrap(await _supabase.rpc('admin_update_profile',{
+            p_user_id:id,p_status:patch.status??null,p_fullname:patch.fullname??null,p_phone:patch.phone??null
+          }));
+          return;
+        }
+        unwrap(await _supabase.from('profiles').update(profileFields(patch)).eq('id',id));
+      },
+      delete:async()=>{
+        unwrap(await _supabase.rpc('admin_update_profile',{p_user_id:id,p_status:'disabled',p_fullname:null,p_phone:null}));
+      }
+    };
+  }
+  function recordRef(ownerId,collectionName,recordId){
+    return {
+      kind:'record',ownerId,collectionName,recordId,
+      get:async()=>{
+        const row=unwrap(await _supabase.from('app_records').select('record_id,payload').eq('owner_id',ownerId).eq('collection_name',collectionName).eq('record_id',recordId).maybeSingle());
+        return snapshot(recordId,row?{...(row.payload||{}),id:row.record_id}:undefined);
+      },
+      set:async value=>{ unwrap(await _supabase.from('app_records').upsert({owner_id:ownerId,collection_name:collectionName,record_id:recordId,payload:value},{onConflict:'owner_id,collection_name,record_id'})); },
+      update:async patch=>{ unwrap(await _supabase.rpc('merge_app_record',{p_owner_id:ownerId,p_collection_name:collectionName,p_record_id:recordId,p_patch:patch})); },
+      delete:async()=>{ unwrap(await _supabase.from('app_records').delete().eq('owner_id',ownerId).eq('collection_name',collectionName).eq('record_id',recordId)); }
+    };
+  }
+  function messageRef(chatId,messageId){
+    return {
+      kind:'message',chatId,messageId,
+      get:async()=>{
+        const row=unwrap(await _supabase.from('chat_messages').select('id,payload').eq('chat_id',chatId).eq('id',messageId).maybeSingle());
+        return snapshot(messageId,row?{...(row.payload||{}),id:row.id}:undefined);
+      },
+      set:async value=>{
+        unwrap(await _supabase.from('chat_messages').insert({chat_id:chatId,id:messageId,sender_id:value.from,recipient_id:value.to==='all'?null:value.to,payload:value}));
+      },
+      update:async()=>{ throw new Error('ویرایش پیام چت فعال نیست.'); },
+      delete:async()=>{ unwrap(await _supabase.from('chat_messages').delete().eq('chat_id',chatId).eq('id',messageId)); }
+    };
+  }
+  const _db={
+    doc(path){
+      const p=parsePath(path);
+      if(p[0]==='users'&&p.length===2) return profileRef(p[1]);
+      if(p[0]==='users'&&p.length===4) return recordRef(p[1],p[2],p[3]);
+      if(p[0]==='chats'&&p.length===4&&p[2]==='messages') return messageRef(p[1],p[3]);
+      throw new Error('مسیر داده پشتیبانی نمی‌شود: '+path);
+    },
+    collection(path){
+      const p=parsePath(path);
+      if(p.length===1&&p[0]==='users') return {kind:'profiles',doc:id=>profileRef(id),get:async()=>{
+        const rows=await fetchAll(_supabase.from('profiles').select('id,email,fullname,username,phone,role,status,join_date').order('join_date',{ascending:false}));
+        return {docs:rows.map(row=>({id:row.id,data:()=>profileData(row)}))};
+      }};
+      if(p.length===3&&p[0]==='users') return {kind:'records',ownerId:p[1],collectionName:p[2],doc:id=>recordRef(p[1],p[2],id),get:async()=>{
+        const rows=await fetchAll(_supabase.from('app_records').select('record_id,payload').eq('owner_id',p[1]).eq('collection_name',p[2]));
+        return {docs:rows.map(row=>({id:row.record_id,data:()=>({...row.payload,id:row.record_id})}))};
+      }};
+      if(p.length===3&&p[0]==='chats'&&p[2]==='messages') return {kind:'messages',chatId:p[1],doc:id=>messageRef(p[1],id),get:async()=>{
+        const rows=await fetchAll(_supabase.from('chat_messages').select('id,payload').eq('chat_id',p[1]).order('created_at',{ascending:true}));
+        return {docs:rows.map(row=>({id:row.id,data:()=>({...row.payload,id:row.id})}))};
+      }};
+      throw new Error('مجموعهٔ داده پشتیبانی نمی‌شود: '+path);
+    }
   };
-
-  firebase.initializeApp(firebaseConfig);
-  const _auth    = firebase.auth();
-  const _db      = firebase.firestore();
-  const _storage = firebase.storage();
-
-  // expose via window._fb for compatibility with existing code
-  window._fb = {
-    auth: _auth,
-    db:   _db,
-    storage: _storage,
-    // Auth methods
-    createUserWithEmailAndPassword: (auth, email, pass) => _auth.createUserWithEmailAndPassword(email, pass),
-    signInWithEmailAndPassword:     (auth, email, pass) => _auth.signInWithEmailAndPassword(email, pass),
-    signOut:                        (auth)              => _auth.signOut(),
-    onAuthStateChanged:             (auth, cb)          => _auth.onAuthStateChanged(cb),
-    updatePassword:                 (user, pass)        => user.updatePassword(pass),
-    // Firestore methods
-    doc:        (db, ...path) => _db.doc(path.join('/')),
-    setDoc:     (ref, data)   => ref.set(data),
-    getDoc:     (ref)         => ref.get(),
-    updateDoc:  (ref, data)   => ref.update(data),
-    deleteDoc:  (ref)         => ref.delete(),
-    collection: (db, path)    => _db.collection(path),
-    addDoc:     (ref, data)   => ref.add(data),
-    getDocs:    (ref)         => ref.get(),
-    serverTimestamp: ()       => firebase.firestore.FieldValue.serverTimestamp(),
-    // Storage methods
-    ref:           (storage, path) => _storage.ref(path),
-    uploadBytes:   (ref, blob)     => ref.put(blob),
-    getDownloadURL:(ref)           => ref.getDownloadURL(),
-    deleteObject:  (ref)           => ref.delete(),
+  const _auth={
+    currentUser:null,
+    onAuthStateChanged(callback){
+      const {data:{subscription}}=_supabase.auth.onAuthStateChange((event,session)=>{
+        _auth.currentUser=session?.user||null;
+        const user=_auth.currentUser?{uid:_auth.currentUser.id,email:_auth.currentUser.email}:null;
+        setTimeout(()=>callback(user),0);
+      });
+      return ()=>subscription.unsubscribe();
+    },
+    signOut:async()=>unwrap(await _supabase.auth.signOut()),
+    signInWithEmailAndPassword:async(email,password)=>{
+      const result=await _supabase.auth.signInWithPassword({email,password});
+      if(result.error) throw result.error;
+      return {user:result.data.user};
+    },
+    createUserWithEmailAndPassword:async(email,password,metadata={})=>{
+      const result=await _supabase.auth.signUp({email,password,options:{data:metadata,emailRedirectTo:window.location.origin+window.location.pathname}});
+      if(result.error) throw result.error;
+      return {user:result.data.user,session:result.data.session};
+    }
   };
-
-  // Auth listener moved to bottom of script
-
-
+  const _storage={bucket:'property-images'};
+  window._backend={
+    auth:_auth,db:_db,storage:_storage,
+    createUserWithEmailAndPassword:(auth,email,pass,metadata)=>_auth.createUserWithEmailAndPassword(email,pass,metadata),
+    signInWithEmailAndPassword:(auth,email,pass)=>_auth.signInWithEmailAndPassword(email,pass),
+    signOut:auth=>_auth.signOut(),onAuthStateChanged:(auth,cb)=>_auth.onAuthStateChanged(cb),
+    updatePassword:async(user,pass)=>unwrap(await _supabase.auth.updateUser({password:pass})),
+    doc:(db,...parts)=>_db.doc(parts.join('/')),
+    setDoc:(ref,data)=>ref.set(data),getDoc:ref=>ref.get(),updateDoc:(ref,data)=>ref.update(data),deleteDoc:ref=>ref.delete(),
+    collection:(db,path)=>_db.collection(path),addDoc:async(ref,data)=>{const id=crypto.randomUUID();const doc=ref.doc(id);await doc.set(data);return doc;},
+    getDocs:ref=>ref.get(),serverTimestamp:()=>new Date().toISOString(),
+    ref:(storage,path)=>({path:String(path)}),
+    uploadBytes:async(ref,blob)=>{
+      const result=await _supabase.storage.from(_storage.bucket).upload(ref.path,blob,{cacheControl:'3600',upsert:false,contentType:blob.type||undefined});
+      if(result.error) throw result.error;
+      return {ref:{path:result.data.path}};
+    },
+    getDownloadURL:async ref=>{
+      const result=await _supabase.storage.from(_storage.bucket).createSignedUrl(ref.path,3600);
+      if(result.error) throw result.error;
+      return result.data.signedUrl;
+    },
+    deleteObject:async ref=>{
+      const result=await _supabase.storage.from(_storage.bucket).remove([ref.path]);
+      if(result.error) throw result.error;
+    }
+  };
 </script>
 <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -2030,15 +2128,14 @@
 
 <script>
 // ============================================================
-//  FIREBASE — AUTH & DATA LAYER
+//  SUPABASE AUTH & DATA LAYER
 // ============================================================
 let currentUser = null;
 
-// helper: wait until Firebase is loaded
-function fb(){ return window._fb; }
+// Supabase client and compatibility adapter are initialized in the document head.
+function backend(){ return window._backend; }
 
-// authInit is now handled by onAuthStateChanged in the module script above
-function authInit(){ /* handled by Firebase onAuthStateChanged */ }
+function authInit(){ /* handled by Supabase onAuthStateChange */ }
 
 function showAuthScreen(){
   document.getElementById('auth-screen').style.display = 'flex';
@@ -2055,44 +2152,29 @@ async function showApp(){
   document.getElementById('sb-role').textContent = currentUser.role === 'admin' ? '👑 مدیر سیستم' : '🤝 مشاور';
   applyRoleAccess();
   if(isAdmin()) updatePendingBadge();
-  // show loading indicator while Firestore loads
+  // show loading indicator while the shared database loads
   document.getElementById('prop-count').textContent = '...';
   document.getElementById('client-count').textContent = '...';
   await loadUserState();
+  await loadChatContacts();
   renderProperties(); renderClients(); renderAdvisors(); renderDeals(); renderTgPosts(); updateCounts(); renderDashboard();
   updateFollowupBadge();
   updateClientReminderBadge();
 }
 
 async function doLogin(){
-  const email    = document.getElementById('login-username').value.trim();
-  const password = document.getElementById('login-password').value;
-  document.getElementById('login-error').style.display = 'none';
-  if(!email || !password){ showLoginError('ایمیل و رمز را وارد کنید'); return; }
-  const btn = document.querySelector('#auth-login-form .btn-primary');
-  if(btn){ btn.disabled = true; btn.textContent = '...'; }
+  const email=document.getElementById('login-username').value.trim();
+  const password=document.getElementById('login-password').value;
+  document.getElementById('login-error').style.display='none';
+  if(!email||!password){showLoginError('ایمیل و رمز را وارد کنید');return;}
+  const btn=document.querySelector('#auth-login-form .btn-primary');
+  if(btn){btn.disabled=true;btn.textContent='...';}
   try {
-    await fb().signInWithEmailAndPassword(fb().auth, email, password);
-    // onAuthStateChanged handles the rest
+    await backend().signInWithEmailAndPassword(backend().auth,email,password);
   } catch(e) {
-    const msgs = {
-      'auth/user-not-found':  'ایمیل یافت نشد',
-      'auth/wrong-password':  'رمز عبور اشتباه است',
-      'auth/invalid-email':   'ایمیل معتبر نیست',
-      'auth/too-many-requests':'تعداد تلاش زیاد است، کمی صبر کنید',
-      'auth/invalid-credential': 'ایمیل یا رمز اشتباه است',
-      'auth/user-disabled': 'این حساب غیرفعال شده است؛ با مدیر سامانه تماس بگیرید.',
-      'auth/operation-not-allowed': 'ورود با ایمیل و رمز در تنظیمات Firebase فعال نیست.',
-      'auth/unauthorized-domain': 'دامنهٔ سایت در دامنه‌های مجاز Firebase ثبت نشده است.',
-      'auth/network-request-failed': 'ارتباط با Firebase برقرار نشد؛ اینترنت یا VPN را بررسی کنید.',
-      'auth/invalid-api-key': 'کلید Firebase نامعتبر است؛ پیکربندی پروژه باید بررسی شود.',
-      'auth/app-not-authorized': 'این برنامه برای پروژهٔ Firebase مجاز نیست.',
-    };
-    // Keep the error code visible when Firebase returns an unrecognized error;
-    // never show or log the submitted email or password.
-    showLoginError(msgs[e.code] || `ورود انجام نشد (${e.code || 'خطای ناشناخته'}). لطفاً همین کد را برای پشتیبانی بفرستید؛ رمز را ارسال نکنید.`);
+    showLoginError(e.message||'ورود انجام نشد. ایمیل و رمز را بررسی کنید.');
   } finally {
-    if(btn){ btn.disabled = false; btn.textContent = 'ورود'; }
+    if(btn){btn.disabled=false;btn.textContent='ورود';}
   }
 }
 
@@ -2116,28 +2198,15 @@ async function doRegister(){
   const btn = document.querySelector('#auth-register-form .btn-primary');
   if(btn){ btn.disabled = true; btn.textContent = '...'; }
   try {
-    const cred = await fb().createUserWithEmailAndPassword(fb().auth, email, pass);
-    const uid = cred.user.uid;
-    // نقش مدیر هرگز در سمت کلاینت تعیین نمی‌شود؛ bootstrap مدیر باید از پنل امن/Firebase Admin انجام شود.
-    await fb().setDoc(fb().doc(fb().db, 'users', uid), {
-      fullname, email, phone,
-      role: 'advisor',
-      status: 'pending',
-      joinDate: new Date().toLocaleDateString('fa-IR'),
-      createdAt: fb().serverTimestamp()
+    await backend().createUserWithEmailAndPassword(backend().auth, email, pass, {
+      fullname, username:email.split('@')[0], phone
     });
-    await fb().signOut(fb().auth);
     document.getElementById('auth-login-form').style.display   = 'none';
     document.getElementById('auth-register-form').style.display= 'none';
     document.getElementById('auth-tabs').style.display         = 'none';
     document.getElementById('auth-pending-box').style.display  = 'block';
   } catch(e) {
-    const msgs = {
-      'auth/email-already-in-use': 'این ایمیل قبلاً ثبت شده',
-      'auth/invalid-email':        'ایمیل معتبر نیست',
-      'auth/weak-password':        'رمز عبور ضعیف است',
-    };
-    showRegError(msgs[e.code] || 'ثبت‌نام انجام نشد. لطفاً دوباره تلاش کنید.');
+    showRegError(e.message || 'ثبت‌نام انجام نشد. لطفاً دوباره تلاش کنید.');
   } finally {
     if(btn){ btn.disabled = false; btn.textContent = 'ثبت‌نام'; }
   }
@@ -2152,12 +2221,14 @@ async function sendPasswordReset(){
   const email = document.getElementById('login-username').value.trim();
   if(!email){ showLoginError('ابتدا ایمیل خود را وارد کنید'); return; }
   try {
-    const { sendPasswordResetEmail } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js");
-    await sendPasswordResetEmail(fb().auth, email);
+    const {error}=await _supabase.auth.resetPasswordForEmail(email,{
+      redirectTo:window.location.origin+window.location.pathname
+    });
+    if(error) throw error;
     showLoginError('');
     notify('ایمیل بازیابی رمز ارسال شد ✅');
   } catch(e){
-    showLoginError('خطا: ' + (e.code==='auth/user-not-found' ? 'ایمیل یافت نشد' : e.message));
+    showLoginError('خطا: '+(e.message||'ارسال ایمیل بازیابی ممکن نشد'));
   }
 }
 
@@ -2174,8 +2245,8 @@ function switchAuthTab(tab){
 
 async function doLogout(){
   document.getElementById('user-menu').style.display = 'none';
-  await fb().signOut(fb().auth);
-  // onAuthStateChanged → showAuthScreen() is called automatically
+  await backend().signOut(backend().auth);
+  // Auth state event → showAuthScreen() is called automatically
   document.getElementById('login-username').value = '';
   document.getElementById('login-password').value = '';
   switchAuthTab('login');
@@ -2193,7 +2264,7 @@ document.addEventListener('click', e => {
 });
 
 // ============================================================
-//  FIRESTORE DATA LAYER
+//  SUPABASE DATA LAYER
 // ============================================================
 // collection paths:
 //   users/{uid}                    → user profile
@@ -2201,8 +2272,19 @@ document.addEventListener('click', e => {
 //   users/{uid}/clients/{id}      → مشتری
 //   users/{uid}/deals/{id}        → معامله
 //   users/{uid}/tgposts/{id}      → پست تلگرام
-//   users/{uid}/reminders/{id}    → یادآور
+//   users/{uid}/reminders/{id}  → یادآور
 //   advisors/{uid}                → for admin: readable list of advisors
+async function refreshSignedPropertyImages(properties){
+  return Promise.all((properties||[]).map(async property=>{
+    const images=await Promise.all((property.images||[]).map(async image=>{
+      if(!image || !image.path) return image;
+      const result=await _supabase.storage.from('property-images').createSignedUrl(image.path,3600);
+      if(result.error){ console.warn('Could not sign a property image URL:',result.error.message); return {...image,url:''}; }
+      return {...image,url:result.data.signedUrl};
+    }));
+    return {...property,images};
+  }));
+}
 
 async function loadUserState(){
   const uid = currentUser.id;
@@ -2211,13 +2293,13 @@ async function loadUserState(){
     : `users/${uid}`;
 
   async function loadCol(col){
-    const q = await fb().getDocs(fb().collection(fb().db, `users/${uid}/${col}`));
+    const q = await backend().getDocs(backend().collection(backend().db, `users/${uid}/${col}`));
     return q.docs.map(d => ({ ...d.data(), id: d.id }));
   }
 
   if(currentUser.role === 'admin'){
     // admin: load ALL users' data
-    const usersSnap = await fb().getDocs(fb().collection(fb().db, 'users'));
+    const usersSnap = await backend().getDocs(backend().collection(backend().db, 'users'));
     let props=[], clients=[], deals=[], tgPosts=[], reminders=[];
     const advisors = [];
     for(const uDoc of usersSnap.docs){
@@ -2225,7 +2307,7 @@ async function loadUserState(){
       const profile = { ...uDoc.data(), id: uid2 };
       if(profile.role !== 'admin') advisors.push(profile);
       const load = async (col) => {
-        const s = await fb().getDocs(fb().collection(fb().db, `users/${uid2}/${col}`));
+        const s = await backend().getDocs(backend().collection(backend().db, `users/${uid2}/${col}`));
         return s.docs.map(d => ({ ...d.data(), id: d.id, _uid: uid2 }));
       };
       const [p,c,d,t,r,fu,ph,ac] = await Promise.all([
@@ -2242,7 +2324,7 @@ async function loadUserState(){
       state.priceHistory=[...state.priceHistory,...ph];
       state.accounting=[...state.accounting,...ac];
     }
-    state.properties = props;
+    state.properties = await refreshSignedPropertyImages(props);
       state.clients = clients;
   state.advisors   = advisors;
     state.deals      = deals;
@@ -2254,7 +2336,7 @@ async function loadUserState(){
       loadCol('properties'), loadCol('clients'), loadCol('deals'),
       loadCol('reminders'), loadCol('followups'), loadCol('priceHistory')
     ]);
-    state.properties  = props;
+    state.properties  = await refreshSignedPropertyImages(props);
     state.clients     = clients;
     state.advisors    = [];
     state.deals       = deals;
@@ -2279,11 +2361,11 @@ async function save(colName, dataArray){
   if(!isAdmin() && !ADVISOR_ALLOWED_COLLECTIONS.has(col)) return;
   for(const item of dataArray){
     const docId = String(item.id);
-    await fb().setDoc(fb().doc(fb().db, `users/${uid}/${col}/${docId}`), _cleanObj(item));
+    await backend().setDoc(backend().doc(backend().db, `users/${uid}/${col}/${docId}`), _cleanObj(item));
   }
 }
 
-// helper: remove undefined values from objects (Firestore rejects them)
+// helper: strip undefined values before sending JSON to the database
 function _cleanObj(obj){
   return JSON.parse(JSON.stringify(obj, (k,v) => v === undefined ? null : v));
 }
@@ -2307,13 +2389,13 @@ function safePhone(value){
   return escapeHTML(String(value ?? '').replace(/[^0-9+()\\-\\s]/g, ''));
 }
 
-// save a single document to Firestore
+// save a single record to Supabase
 async function _saveDoc(col, data){
   if(!isAdmin() && !ADVISOR_ALLOWED_COLLECTIONS.has(col)) throw new Error('این عملیات فقط برای مدیر مجاز است');
   const uid = currentUser.id;
   const docId = String(data.id || Date.now());
   data.id = docId;
-  await fb().setDoc(fb().doc(fb().db, `users/${uid}/${col}/${docId}`), _cleanObj(data));
+  await backend().setDoc(backend().doc(backend().db, `users/${uid}/${col}/${docId}`), _cleanObj(data));
   return data;
 }
 
@@ -2323,14 +2405,14 @@ async function saveRecordToOwner(col, data, ownerUid){
   const uid = String(ownerUid || currentUser.id);
   if(!isAdmin() && uid !== String(currentUser.id)) throw new Error('دسترسی ویرایش این رکورد را ندارید');
   const { _uid, ...persisted } = data || {};
-  await fb().setDoc(fb().doc(fb().db, `users/${uid}/${col}/${String(persisted.id)}`), _cleanObj(persisted));
+  await backend().setDoc(backend().doc(backend().db, `users/${uid}/${col}/${String(persisted.id)}`), _cleanObj(persisted));
 }
 
 // delete a single document
 async function _deleteDoc(col, id){
   if(!isAdmin() && !ADVISOR_ALLOWED_COLLECTIONS.has(col)) throw new Error('این عملیات فقط برای مدیر مجاز است');
   const uid = currentUser.id;
-  await fb().deleteDoc(fb().doc(fb().db, `users/${uid}/${col}/${String(id)}`));
+  await backend().deleteDoc(backend().doc(backend().db, `users/${uid}/${col}/${String(id)}`));
 }
 
 // ============================================================
@@ -2339,7 +2421,7 @@ async function _deleteDoc(col, id){
 async function updatePendingBadge(){
   if(!isAdmin()) return;
   try {
-    const snap = await fb().getDocs(fb().collection(fb().db, 'users'));
+    const snap = await backend().getDocs(backend().collection(backend().db, 'users'));
     const pending = snap.docs.filter(d => d.data().status==='pending').length;
     const badge = document.getElementById('pending-count');
     if(badge){
@@ -2351,7 +2433,7 @@ async function updatePendingBadge(){
 
 async function renderAdminPage(){
   if(!isAdmin()) return showPage('dashboard');
-  const usersSnap = await fb().getDocs(fb().collection(fb().db, 'users'));
+  const usersSnap = await backend().getDocs(backend().collection(backend().db, 'users'));
   const users = usersSnap.docs.map(d => ({ ...d.data(), id: d.id }));
   const advisors = users.filter(u => u.role === 'advisor');
   const pending  = advisors.filter(u => u.status === 'pending');
@@ -2431,7 +2513,7 @@ async function renderAdminPage(){
 async function approveUser(id){
   if(!isAdmin()) return;
   try {
-    await fb().updateDoc(fb().doc(fb().db, 'users', id), { status: 'active' });
+    await backend().updateDoc(backend().doc(backend().db, 'users', id), { status: 'active' });
     await renderAdminPage(); updatePendingBadge();
     notify('کاربر تأیید شد ✅');
   } catch(e){ notify('خطا: '+e.message,'var(--red)'); }
@@ -2439,25 +2521,25 @@ async function approveUser(id){
 
 async function rejectUser(id){
   if(!isAdmin()) return;
-  if(!confirm('این درخواست رد و حذف شود؟')) return;
+  if(!confirm('این درخواست رد و حساب کاربری غیرفعال شود؟')) return;
   try {
-    await fb().deleteDoc(fb().doc(fb().db, 'users', id));
+    await backend().updateDoc(backend().doc(backend().db, 'users', id), { status: 'disabled' });
     await renderAdminPage(); updatePendingBadge();
-    notify('درخواست رد شد','var(--red)');
+    notify('درخواست رد و حساب غیرفعال شد','var(--red)');
   } catch(e){ notify('خطا: '+e.message,'var(--red)'); }
 }
 
 async function disableUser(id){
   if(!isAdmin()) return;
   try {
-    await fb().updateDoc(fb().doc(fb().db, 'users', id), { status: 'disabled' });
+    await backend().updateDoc(backend().doc(backend().db, 'users', id), { status: 'disabled' });
     await renderAdminPage();
     notify('کاربر غیرفعال شد','var(--red)');
   } catch(e){ notify('خطا: '+e.message,'var(--red)'); }
 }
 
 function resetUserPass(id){
-  // با Firebase Admin SDK امکان‌پذیر است؛ در کلاینت فقط می‌توانید به کاربر پیام ارسال کنید
+  // A password reset is initiated by the account owner from the sign-in screen.
   notify('برای ریست رمز، کاربر باید از صفحه ورود "فراموشی رمز" را بزند','var(--accent)');
 }
 
@@ -2495,12 +2577,12 @@ async function saveProfile(){
   if(newpass && newpass !== newpass2){ notify('رمزهای جدید یکسان نیستند','var(--red)'); return; }
   if(newpass && newpass.length < 6){ notify('رمز جدید حداقل ۶ کاراکتر باشد','var(--red)'); return; }
   try {
-    // آپدیت پروفایل در Firestore
-    await fb().updateDoc(fb().doc(fb().db, 'users', currentUser.id), { fullname, phone });
+    // Update only the signed-in user's editable profile fields.
+    await backend().updateDoc(backend().doc(backend().db, 'users', currentUser.id), { fullname, phone });
     currentUser.fullname = fullname; currentUser.phone = phone;
-    // تغییر رمز عبور در Firebase Auth
+    // Change the password through Supabase Auth.
     if(newpass){
-      await fb().updatePassword(fb().auth.currentUser, newpass);
+      await backend().updatePassword(backend().auth.currentUser, newpass);
     }
     document.getElementById('sb-avatar').textContent = fullname[0];
     document.getElementById('sb-name').textContent = fullname;
@@ -3214,8 +3296,8 @@ const withTimeout = (promise, ms, message) => {
   ]).finally(() => clearTimeout(timer));
 };
 
-// ذخیره تصویر داخل سند برای زمانی که Firebase Storage فعال نیست.
-// سقف محافظه‌کارانه زیر محدودیت ۱ مگابایتی Firestore نگه داشته می‌شود.
+// Keep a small compressed inline fallback if a private Storage upload fails.
+// The conservative cap also prevents very large database requests.
 const INLINE_IMAGE_TOTAL_LIMIT = 700000;
 const INLINE_IMAGE_MAX_DIMENSION = 1280;
 
@@ -3285,9 +3367,9 @@ async function uploadPropertyImages(docId, images) {
         const res = await withTimeout(fetch(img.data), 8000, 'خواندن تصویر بیش از حد طول کشید');
         const blob = await res.blob();
         const path = `properties/${currentUser.id}/${Date.now()}_${img.name}`;
-        const storageRef = fb().ref(fb().storage, path);
-        const snap = await withTimeout(fb().uploadBytes(storageRef, blob), 10000, 'آپلود تصویر بیش از ۱۰ ثانیه طول کشید');
-        const url = await withTimeout(fb().getDownloadURL(snap.ref), 8000, 'دریافت لینک تصویر بیش از حد طول کشید');
+        const storageRef = backend().ref(backend().storage, path);
+        const snap = await withTimeout(backend().uploadBytes(storageRef, blob), 10000, 'آپلود تصویر بیش از ۱۰ ثانیه طول کشید');
+        const url = await withTimeout(backend().getDownloadURL(snap.ref), 8000, 'دریافت لینک تصویر بیش از حد طول کشید');
         return { url, name: img.name, path };
       } catch(error) {
         failedImages.push({ name: img.name || 'تصویر', error: error.message });
@@ -3301,7 +3383,7 @@ async function uploadPropertyImages(docId, images) {
   if(uploadedImages.length){
     try {
       await withTimeout(
-        fb().updateDoc(fb().doc(fb().db, `users/${currentUser.id}/properties/${docId}`), { images: uploadedImages }),
+        backend().updateDoc(backend().doc(backend().db, `users/${currentUser.id}/properties/${docId}`), { images: uploadedImages }),
         10000,
         'ثبت لینک تصاویر بیش از ۱۰ ثانیه طول کشید'
       );
@@ -3392,7 +3474,7 @@ async function saveProperty(){
       images: keepExistingImages ? (existing.images || []) : inlineImageResult.images,
       videos: [...currentVideos],
       date: normalizeSiteDate(existing?.date) || siteToday(),
-      createdAt: existing?.createdAt || fb().serverTimestamp(),
+      createdAt: existing?.createdAt || backend().serverTimestamp(),
       userId: existing?.userId || ownerUid,
       userName: existing?.userName || currentUser.fullname || '',
       address: gVal('p-address'),
@@ -3642,7 +3724,7 @@ async function setApproval(id, newStatus){
     const prop = state.properties.find(p=>sameId(p.id, id));
     if(!prop) return;
     prop.approvalStatus = newStatus;
-    await fb().setDoc(fb().doc(fb().db, `users/${prop.userId}/properties/${prop.id}`), _cleanObj(prop));
+    await backend().setDoc(backend().doc(backend().db, `users/${prop.userId}/properties/${prop.id}`), _cleanObj(prop));
     renderProperties();
     const msgMap = {approved:'ملک تایید شد ✅', pending:'به حالت در انتظار برگشت', rejected:'ملک رد شد'};
     notify(msgMap[newStatus] || 'بروزرسانی شد');
@@ -3736,7 +3818,7 @@ async function deleteProp(id){
     if(prop && prop.images){
       for(const img of prop.images){
         if(img.path){
-          try { await fb().deleteObject(fb().ref(fb().storage, img.path)); } catch(e){}
+          try { await backend().deleteObject(backend().ref(backend().storage, img.path)); } catch(e){}
         }
       }
     }
@@ -3933,7 +4015,7 @@ async function saveClient(){
     reminderEnabled: reminderActive,
     reminderStatus: reminderActive ? 'active' : 'completed',
     date: normalizeSiteDate(existing?.date) || siteToday(),
-    createdAt: existing?.createdAt || fb().serverTimestamp(),
+    createdAt: existing?.createdAt || backend().serverTimestamp(),
     userId: existing?.userId || ownerUid
   };
   try {
@@ -4142,7 +4224,7 @@ async function toggleClientReminder(id, enabled){
   const next = enabled === undefined ? !client.reminderEnabled : !!enabled;
   const ownerUid = client._uid || client.userId || currentUser.id;
   try {
-    await fb().updateDoc(fb().doc(fb().db, `users/${ownerUid}/clients/${client.id}`), {
+    await backend().updateDoc(backend().doc(backend().db, `users/${ownerUid}/clients/${client.id}`), {
       reminderEnabled: next,
       reminderStatus: next ? 'active' : 'completed'
     });
@@ -4195,7 +4277,7 @@ async function saveAdvisor(){
   };
   try {
     if(isEditing){
-      await fb().updateDoc(fb().doc(fb().db, `users/${String(existing.id)}`), _cleanObj({ fullname:name, phone:a.phone, commission:a.commission, specialty:a.specialty }));
+      await backend().updateDoc(backend().doc(backend().db, `users/${String(existing.id)}`), _cleanObj({ fullname:name, phone:a.phone, commission:a.commission, specialty:a.specialty }));
       const index = state.advisors.findIndex(item => sameId(item.id, a.id));
       if(index >= 0) state.advisors[index] = a;
     } else {
@@ -4610,7 +4692,7 @@ function updateCounts(){
 
 function clearForm(ids){ ids.forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; }); }
 
-// Init — Firebase onAuthStateChanged in the module script handles auth startup
+// Init — Supabase onAuthStateChange handles auth startup.
 // authInit() is a no-op here; kept for safety
 authInit();
 
@@ -4735,10 +4817,10 @@ function matchProperties(clientId) {
 }
 
 // Auth state listener (placed here so all functions are defined)
-_auth.onAuthStateChanged(async function(fbUser) {
-  if (fbUser) {
+_auth.onAuthStateChanged(async function(authUser) {
+  if (authUser) {
     try {
-      const snap = await _db.doc('users/' + fbUser.uid).get();
+      const snap = await _db.doc('users/' + authUser.uid).get();
       if (snap.exists) {
         const profile = snap.data();
         if (profile.status === 'disabled') {
@@ -4755,7 +4837,7 @@ _auth.onAuthStateChanged(async function(fbUser) {
           document.getElementById('auth-pending-box').style.display  = 'block';
           return;
         }
-        currentUser = Object.assign({}, profile, { id: fbUser.uid, email: fbUser.email });
+        currentUser = Object.assign({}, profile, { id: authUser.uid, email: authUser.email });
         await showApp();
       } else {
         await _auth.signOut();
@@ -4768,9 +4850,7 @@ _auth.onAuthStateChanged(async function(fbUser) {
       await _auth.signOut();
       showAuthScreen();
       switchAuthTab('login');
-      showLoginError(e.code === 'permission-denied'
-        ? 'دسترسی پروفایل بسته است؛ Rules فایربیس را بررسی کنید.'
-        : 'خطا در بارگذاری پروفایل؛ لطفاً دوباره تلاش کنید.');
+      showLoginError(e.message || 'خطا در بارگذاری پروفایل؛ لطفاً دوباره تلاش کنید.');
     }
   } else {
     currentUser = null;
@@ -4908,7 +4988,7 @@ async function saveFollowup(){
     if(linkedClient && becameFinal && linkedClient.reminderEnabled){
       try {
         const clientOwnerUid = linkedClient._uid || linkedClient.userId || currentUser.id;
-        await fb().updateDoc(fb().doc(fb().db, `users/${clientOwnerUid}/clients/${linkedClient.id}`), { reminderEnabled:false, reminderStatus:'completed', reminderCompletedAt:new Date().toISOString() });
+        await backend().updateDoc(backend().doc(backend().db, `users/${clientOwnerUid}/clients/${linkedClient.id}`), { reminderEnabled:false, reminderStatus:'completed', reminderCompletedAt:new Date().toISOString() });
         linkedClient.reminderEnabled = false;
         linkedClient.reminderStatus = 'completed';
       } catch(error){ console.warn('Could not close client reminder automatically:', error); }
@@ -5292,16 +5372,24 @@ function renderReports(){
 // ════════════════════════════════════════════════
 let activeChatUser = null;
 
+async function loadChatContacts(){
+  try {
+    const {data,error}=await _supabase.rpc('list_active_chat_contacts');
+    if(error) throw error;
+    state.chatContacts=(data||[]).map(user=>({id:user.id,name:user.fullname||'کاربر',role:user.role}));
+  } catch(error) {
+    state.chatContacts=[];
+    console.warn('Could not load chat contacts:',error.message);
+  }
+}
+
 function renderChatContacts(){
   const el = document.getElementById('chat-contacts');
   if(!el) return;
   const users = [
     { id:'all', name:'📢 همه کاربران', role:'group' },
-    ...state.advisors.map(a => ({ id:a.id, name:a.name, role:'advisor' }))
+    ...(state.chatContacts||[])
   ];
-  if(currentUser.role !== 'admin'){
-    users.push({ id:'admin', name:'👑 مدیر سیستم', role:'admin' });
-  }
   el.innerHTML = users.map(function(u){
     var bg = (activeChatUser===u.id) ? 'rgba(232,168,56,.15)' : 'none';
     return '<button data-uid="'+escapeHTML(u.id)+'" data-uname="'+escapeHTML(u.name)+'" onclick="openChatFromBtn(this)" style="width:100%;padding:10px 12px;background:'+bg+';border:none;border-radius:8px;color:var(--text);font-family:Vazirmatn,sans-serif;font-size:12px;text-align:right;cursor:pointer;display:flex;align-items:center;gap:8px;margin-bottom:2px;">' +
@@ -5314,9 +5402,17 @@ function openChatFromBtn(btn){
   openChat(btn.getAttribute('data-uid'), btn.getAttribute('data-uname'));
 }
 
-function openChat(userId, userName){
+async function openChat(userId, userName){
   activeChatUser = userId;
   document.getElementById('chat-header').innerHTML = '<div class="card-title">'+escapeHTML(userName)+'</div>';
+  const chatId=userId==='all'?'all':[currentUser.id,userId].sort().join('_');
+  try {
+    const snap=await backend().getDocs(backend().collection(backend().db,'chats/'+chatId+'/messages'));
+    if(!state.chatMessages) state.chatMessages={};
+    state.chatMessages[chatId]=snap.docs.map(doc=>doc.data()).sort((a,b)=>(a.ts||0)-(b.ts||0));
+  } catch(error) {
+    notify('بارگذاری پیام‌ها انجام نشد: '+error.message,'var(--red)');
+  }
   renderChatMessages();
   renderChatContacts();
 }
@@ -5335,7 +5431,7 @@ async function sendChatMsg(){
     ts: Date.now()
   };
   try {
-    const chatId = [currentUser.id, activeChatUser].sort().join('_');
+    const chatId = activeChatUser==='all'?'all':[currentUser.id,activeChatUser].sort().join('_');
     await _db.doc('chats/'+chatId+'/messages/'+msg.id).set(_cleanObj(msg));
     if(!state.chatMessages) state.chatMessages = {};
     if(!state.chatMessages[chatId]) state.chatMessages[chatId] = [];
@@ -5348,7 +5444,7 @@ async function sendChatMsg(){
 function renderChatMessages(){
   const el = document.getElementById('chat-messages');
   if(!el || !activeChatUser) return;
-  const chatId = [currentUser.id, activeChatUser].sort().join('_');
+  const chatId = activeChatUser==='all'?'all':[currentUser.id,activeChatUser].sort().join('_');
   const msgs = (state.chatMessages && state.chatMessages[chatId]) || [];
   if(!msgs.length){
     el.innerHTML = '<div class="empty-state"><div class="icon">💬</div><p>هنوز پیامی ارسال نشده</p></div>';
