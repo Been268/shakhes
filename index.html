@@ -599,6 +599,18 @@
     position:absolute; bottom:4px; right:4px; background:var(--accent);
     color:#000; font-size:9px; font-weight:700; padding:2px 6px; border-radius:10px;
   }
+  .deal-attachment-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:8px;margin-top:8px; }
+  .deal-attachment-card { position:relative;min-width:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface2); }
+  .deal-attachment-card img { display:block;width:100%;aspect-ratio:1;object-fit:cover; }
+  .deal-attachment-name { padding:4px 5px;font-size:10px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  .deal-attachment-remove { position:absolute;top:4px;left:4px;width:22px;height:22px;border:0;border-radius:50%;background:rgba(248,81,73,.92);color:#fff;cursor:pointer; }
+  .deal-gallery-section { margin:14px 0;padding-top:12px;border-top:1px solid var(--border); }
+  .deal-gallery-section h4 { margin:0 0 8px;font-size:14px; }
+  .deal-gallery-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px; }
+  .deal-gallery-grid img { width:100%;aspect-ratio:1;object-fit:cover;border-radius:9px;border:1px solid var(--border); }
+  .deal-summary { display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;padding:10px;border-radius:9px;background:var(--surface2); }
+  .deal-summary-item { font-size:12px;color:var(--text2); }
+  .deal-summary-item b { display:block;margin-top:3px;color:var(--text); }
   .video-link-item {
     display:flex; align-items:center; gap:8px; background:var(--surface2);
     border:1px solid var(--border); border-radius:8px; padding:8px 12px;
@@ -2062,9 +2074,36 @@
         <input type="text" id="d-date" inputmode="numeric" dir="ltr" autocomplete="off" maxlength="10" placeholder="۱۴۰۵/۰۱/۰۱">
       </div>
     </div>
+    <div class="form-grid single" style="margin-top:12px;">
+      <div class="form-group full">
+        <label>🏠 عکس‌های ملک</label>
+        <input type="file" id="d-property-photos" accept="image/*" multiple onchange="addDealAttachments('propertyPhotos',this)">
+        <small style="color:var(--text3);font-size:11px;">چند تصویر انتخاب کنید؛ حداکثر ۱۰ فایل در هر معامله و حداکثر ۱۰ مگابایت برای هر تصویر.</small>
+        <div id="d-property-photo-status" role="status" style="color:var(--red);font-size:11px;margin-top:4px;"></div>
+        <div id="d-property-photo-preview" class="deal-attachment-grid"></div>
+      </div>
+      <div class="form-group full">
+        <label>📄 تصویر مدارک معامله</label>
+        <input type="file" id="d-document-photos" accept="image/*" multiple onchange="addDealAttachments('dealDocuments',this)">
+        <small style="color:var(--text3);font-size:11px;">تصویر اسناد یا برگه‌های معامله؛ فایل‌های تصویری در فضای ذخیره‌سازی خصوصی نگه‌داری می‌شوند.</small>
+        <div id="d-document-photo-status" role="status" style="color:var(--red);font-size:11px;margin-top:4px;"></div>
+        <div id="d-document-photo-preview" class="deal-attachment-grid"></div>
+      </div>
+    </div>
     <div class="form-actions">
       <button class="btn btn-ghost" onclick="closeModal('deal-modal')">انصراف</button>
       <button class="btn btn-primary" onclick="saveDeal()">💾 ذخیره</button>
+    </div>
+  </div>
+</div>
+
+<!-- Deal Details Modal -->
+<div class="modal-overlay" id="deal-details-modal">
+  <div class="modal" style="width:760px;max-width:96vw;">
+    <div class="modal-title" id="deal-details-title">📋 جزئیات معامله</div>
+    <div id="deal-details-content"></div>
+    <div class="form-actions" style="margin-top:16px;">
+      <button class="btn btn-ghost" onclick="closeModal('deal-details-modal')">بستن</button>
     </div>
   </div>
 </div>
@@ -2296,6 +2335,20 @@ async function refreshSignedPropertyImages(properties){
     return {...property,images};
   }));
 }
+async function refreshSignedDealAttachments(deals){
+  return Promise.all((deals||[]).map(async deal=>{
+    const refreshed={...deal};
+    for(const field of ['propertyPhotos','dealDocuments']){
+      refreshed[field]=await Promise.all((deal[field]||[]).map(async attachment=>{
+        if(!attachment || !attachment.path) return attachment;
+        const result=await _supabase.storage.from('property-images').createSignedUrl(attachment.path,3600);
+        if(result.error){ console.warn('Could not sign a deal attachment URL:',result.error.message); return {...attachment,url:''}; }
+        return {...attachment,url:result.data.signedUrl};
+      }));
+    }
+    return refreshed;
+  }));
+}
 
 async function loadUserState(){
   const uid = currentUser.id;
@@ -2340,7 +2393,7 @@ async function loadUserState(){
     state.properties = await refreshSignedPropertyImages(props);
       state.clients = clients;
   state.advisors   = advisors;
-    state.deals      = deals;
+    state.deals      = await refreshSignedDealAttachments(deals);
     state.tgPosts    = tgPosts;
     state.reminders  = reminders;
     state.clientActivities = clientActivities;
@@ -2353,7 +2406,7 @@ async function loadUserState(){
     state.properties  = await refreshSignedPropertyImages(props);
     state.clients     = clients;
     state.advisors    = [];
-    state.deals       = deals;
+    state.deals       = await refreshSignedDealAttachments(deals);
     state.tgPosts     = [];
     state.reminders   = reminders;
     state.followups   = followups;
@@ -2686,6 +2739,12 @@ let editingPropertyId = null;
 let editingClientId = null;
 let editingAdvisorId = null;
 let editingDealId = null;
+let dealNewFiles = {propertyPhotos:[],dealDocuments:[]};
+let dealExistingAttachments = {propertyPhotos:[],dealDocuments:[]};
+let dealRemovedAttachmentPaths = new Set();
+let dealPreviewUrls = new Set();
+const DEAL_ATTACHMENT_MAX_FILES = 10;
+const DEAL_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 let editingTgPostId = null;
 let editingReminderId = null;
 let editingFollowupId = null;
@@ -2754,6 +2813,7 @@ function openDealFromClient(button){
 }
 function openNewDealModal(clientId=''){
   editingDealId = null;
+  resetDealAttachments();
   setFieldValue('d-title',''); setFieldValue('d-type','فروش'); setFieldValue('d-price',''); setFieldValue('d-commission',''); setFieldValue('d-advisor',''); setFieldValue('d-date',toPersianDigits(siteToday()));
   populateDealClientOptions(clientId);
   setModalMode('deal-modal', '📋 ثبت معامله جدید', '💾 ذخیره');
@@ -4703,6 +4763,7 @@ function openEditDeal(id){
   const d = state.deals.find(item => sameId(item.id, id));
   if(!d) return;
   editingDealId = String(d.id);
+  resetDealAttachments(d);
   populateDealClientOptions(d.clientId || '');
   setFieldValue('d-title', d.title || ''); setFieldValue('d-type', d.type || 'فروش');
   setFieldValue('d-price', d.price || ''); setFieldValue('d-commission', d.commission || '');
@@ -4711,12 +4772,167 @@ function openEditDeal(id){
   setModalMode('deal-modal', '✏️ ویرایش معامله', '💾 ذخیره تغییرات');
   openModal('deal-modal');
 }
+
+function resetDealAttachments(deal=null){
+  dealPreviewUrls.forEach(url=>URL.revokeObjectURL(url));
+  dealPreviewUrls = new Set();
+  dealNewFiles = {propertyPhotos:[],dealDocuments:[]};
+  dealExistingAttachments = {
+    propertyPhotos:[...(deal?.propertyPhotos || [])],
+    dealDocuments:[...(deal?.dealDocuments || [])]
+  };
+  dealRemovedAttachmentPaths = new Set();
+  setFieldValue('d-property-photos',''); setFieldValue('d-document-photos','');
+  ['d-property-photo-status','d-document-photo-status'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=''; });
+  renderDealAttachmentPreviews();
+}
+
+function dealAttachmentCount(){
+  return ['propertyPhotos','dealDocuments'].reduce((count,field)=>{
+    const existing=(dealExistingAttachments[field]||[]).filter(item=>!item?.path || !dealRemovedAttachmentPaths.has(item.path)).length;
+    return count + existing + (dealNewFiles[field]||[]).length;
+  },0);
+}
+
+function addDealAttachments(field,input){
+  if(!['propertyPhotos','dealDocuments'].includes(field) || !input) return;
+  const statusId=field==='propertyPhotos'?'d-property-photo-status':'d-document-photo-status';
+  const status=document.getElementById(statusId);
+  if(status) status.textContent='';
+  for(const file of Array.from(input.files||[])){
+    let reason='';
+    if(!file.type || !file.type.startsWith('image/')) reason='فقط فایل‌های تصویری قابل انتخاب هستند.';
+    else if(file.size>DEAL_ATTACHMENT_MAX_BYTES) reason='اندازه هر تصویر نباید بیشتر از ۱۰ مگابایت باشد.';
+    else if(dealAttachmentCount()>=DEAL_ATTACHMENT_MAX_FILES) reason='حداکثر ۱۰ فایل برای هر معامله مجاز است.';
+    if(reason){
+      if(status) status.textContent=reason;
+      continue;
+    }
+    dealNewFiles[field].push(file);
+  }
+  input.value='';
+  renderDealAttachmentPreviews();
+}
+
+function removeExistingDealAttachment(field,index){
+  const item=(dealExistingAttachments[field]||[])[index];
+  if(item?.path) dealRemovedAttachmentPaths.add(item.path);
+  renderDealAttachmentPreviews();
+}
+
+function removeNewDealAttachment(field,index){
+  if(dealNewFiles[field]) dealNewFiles[field].splice(index,1);
+  renderDealAttachmentPreviews();
+}
+
+function renderDealAttachmentPreviews(){
+  dealPreviewUrls.forEach(url=>URL.revokeObjectURL(url));
+  dealPreviewUrls = new Set();
+  const groups=[
+    {field:'propertyPhotos',elementId:'d-property-photo-preview'},
+    {field:'dealDocuments',elementId:'d-document-photo-preview'}
+  ];
+  for(const group of groups){
+    const container=document.getElementById(group.elementId);
+    if(!container) continue;
+    const existing=(dealExistingAttachments[group.field]||[]).map((item,index)=>({item,index}))
+      .filter(({item})=>!item?.path || !dealRemovedAttachmentPaths.has(item.path))
+      .map(({item,index})=>{
+        const preview=item?.url ? `<img src="${escapeHTML(item.url)}" alt="${escapeHTML(item.name||'پیوست معامله')}">` : '<div style="height:82px;display:grid;place-items:center;">🖼️</div>';
+        const remove=item?.path?`<button type="button" class="deal-attachment-remove" onclick="removeExistingDealAttachment('${group.field}',${index})" aria-label="حذف تصویر">×</button>`:'';
+        return `<div class="deal-attachment-card">${preview}${remove}<div class="deal-attachment-name">${escapeHTML(item?.name||'تصویر ذخیره‌شده')}</div></div>`;
+      }).join('');
+    const pending=(dealNewFiles[group.field]||[]).map((file,index)=>{
+      const url=URL.createObjectURL(file); dealPreviewUrls.add(url);
+      return `<div class="deal-attachment-card"><img src="${url}" alt="${escapeHTML(file.name)}"><button type="button" class="deal-attachment-remove" onclick="removeNewDealAttachment('${group.field}',${index})" aria-label="حذف تصویر انتخاب‌شده">×</button><div class="deal-attachment-name">${escapeHTML(file.name)}</div></div>`;
+    }).join('');
+    container.innerHTML=existing+pending || '<small style="color:var(--text3);">هنوز تصویری انتخاب نشده است.</small>';
+  }
+}
+
+function safeDealAttachmentName(name){
+  return String(name||'image').replace(/[^a-zA-Z0-9._-]/g,'_').slice(-90) || 'image';
+}
+
+async function uploadDealAttachmentFiles(field,files,ownerUid,dealId,createdPaths){
+  const storage=_supabase.storage.from('property-images');
+  const uploaded=[];
+  for(const file of files||[]){
+    const path=`deals/${ownerUid}/${dealId}/${field}/${crypto.randomUUID()}-${safeDealAttachmentName(file.name)}`;
+    const result=await storage.upload(path,file,{cacheControl:'3600',upsert:false,contentType:file.type});
+    if(result.error) throw result.error;
+    createdPaths.push(result.data.path);
+    uploaded.push({path:result.data.path,name:file.name,contentType:file.type,size:file.size});
+  }
+  return uploaded;
+}
+
+async function copyDealAttachmentsForOwner(attachments,ownerUid,dealId,createdPaths){
+  const storage=_supabase.storage.from('property-images');
+  const copied={propertyPhotos:[],dealDocuments:[]};
+  for(const field of ['propertyPhotos','dealDocuments']){
+    for(const item of attachments[field]||[]){
+      if(!item?.path){ copied[field].push(item); continue; }
+      const downloaded=await storage.download(item.path);
+      if(downloaded.error) throw downloaded.error;
+      const path=`deals/${ownerUid}/${dealId}/${field}/${crypto.randomUUID()}-${safeDealAttachmentName(item.name)}`;
+      const contentType=item.contentType || downloaded.data.type || 'image/jpeg';
+      const uploaded=await storage.upload(path,downloaded.data,{cacheControl:'3600',upsert:false,contentType});
+      if(uploaded.error) throw uploaded.error;
+      createdPaths.push(uploaded.data.path);
+      copied[field].push({...item,path:uploaded.data.path,contentType,url:''});
+    }
+  }
+  return copied;
+}
+
+async function deleteDealAttachmentPaths(paths){
+  const unique=[...new Set((paths||[]).filter(Boolean))];
+  if(!unique.length) return;
+  const result=await _supabase.storage.from('property-images').remove(unique);
+  if(result.error) throw result.error;
+}
+
+function dealGalleryHTML(label,items){
+  const list=items||[];
+  const cards=list.map(item=>item?.url
+    ? `<a href="${escapeHTML(item.url)}" target="_blank" rel="noopener noreferrer"><img loading="lazy" src="${escapeHTML(item.url)}" alt="${escapeHTML(item.name||label)}"><div class="deal-attachment-name">${escapeHTML(item.name||'تصویر')}</div></a>`
+    : '<div class="deal-attachment-card" style="padding:14px;text-align:center;color:var(--text3);">پیش‌نمایش تصویر در دسترس نیست</div>'
+  ).join('');
+  return `<section class="deal-gallery-section"><h4>${escapeHTML(label)} (${list.length})</h4>${list.length?`<div class="deal-gallery-grid">${cards}</div>`:'<div style="color:var(--text3);font-size:12px;">تصویری ثبت نشده است.</div>'}</section>`;
+}
+
+async function openDealDetails(id){
+  const deal=state.deals.find(item=>sameId(item.id,id));
+  if(!deal) return;
+  const title=document.getElementById('deal-details-title');
+  const content=document.getElementById('deal-details-content');
+  if(title) title.textContent='📋 '+(deal.title||'جزئیات معامله');
+  if(content) content.innerHTML='<div style="padding:16px;color:var(--text2);">در حال بارگذاری تصاویر…</div>';
+  openModal('deal-details-modal');
+  let refreshed=deal;
+  try { refreshed=(await refreshSignedDealAttachments([deal]))[0] || deal; }
+  catch(error){ console.warn('Could not refresh deal attachments:',error); }
+  const index=state.deals.findIndex(item=>sameId(item.id,deal.id));
+  if(index>=0) state.deals[index]=refreshed;
+  const summary=`<div class="deal-summary">
+    <div class="deal-summary-item">مشتری<b>${escapeHTML(refreshed.clientName||'—')}</b></div>
+    <div class="deal-summary-item">نوع معامله<b>${escapeHTML(refreshed.type||'—')}</b></div>
+    <div class="deal-summary-item">قیمت نهایی<b>${refreshed.price?moneyHTML(refreshed.price):'—'}</b></div>
+    <div class="deal-summary-item">کمیسیون<b>${refreshed.commission?moneyHTML(refreshed.commission):'—'}</b></div>
+    <div class="deal-summary-item">مشاور<b>${escapeHTML(refreshed.advisor||'—')}</b></div>
+    <div class="deal-summary-item">تاریخ<b>${escapeHTML(siteDateDisplay(refreshed.date)||'—')}</b></div>
+  </div>`;
+  if(content) content.innerHTML=summary+dealGalleryHTML('عکس‌های ملک',refreshed.propertyPhotos)+dealGalleryHTML('تصاویر مدارک معامله',refreshed.dealDocuments);
+}
+
 async function saveDeal(){
   const title = document.getElementById('d-title').value.trim();
   const dateInput = document.getElementById('d-date').value.trim();
   const date = normalizeSiteDate(dateInput);
   if(!title){ notify('عنوان معامله را وارد کنید','var(--red)'); return; }
   if(!date){ notify('تاریخ معامله را به شکل ۱۴۰۵/۰۱/۰۱ وارد کنید','var(--red)'); return; }
+  if(dealAttachmentCount()>DEAL_ATTACHMENT_MAX_FILES){ notify('حداکثر ۱۰ تصویر در هر معامله مجاز است','var(--red)'); return; }
   const existing = editingDealId ? state.deals.find(item => sameId(item.id, editingDealId)) : null;
   const isEditing = !!existing;
   const previousOwnerUid = recordOwnerForCurrentView(existing, currentUser.id);
@@ -4739,22 +4955,57 @@ async function saveDeal(){
     userId: ownerUid,
     _uid: ownerUid
   };
+  const createdPaths=[];
+  let oldPathsToDelete=[];
+  let dealCommitted=false;
+  const ownerChanged=isEditing && String(previousOwnerUid)!==String(ownerUid);
   try {
+    let attachments={
+      propertyPhotos:(dealExistingAttachments.propertyPhotos||[]).filter(item=>!item?.path || !dealRemovedAttachmentPaths.has(item.path)),
+      dealDocuments:(dealExistingAttachments.dealDocuments||[]).filter(item=>!item?.path || !dealRemovedAttachmentPaths.has(item.path))
+    };
+    if(ownerChanged){
+      attachments=await copyDealAttachmentsForOwner(attachments,ownerUid,d.id,createdPaths);
+      oldPathsToDelete=['propertyPhotos','dealDocuments'].flatMap(field=>(existing[field]||[]).map(item=>item?.path).filter(Boolean));
+    } else if(isEditing){
+      oldPathsToDelete=['propertyPhotos','dealDocuments'].flatMap(field=>(existing[field]||[]).filter(item=>item?.path && dealRemovedAttachmentPaths.has(item.path)).map(item=>item.path));
+    }
+    for(const field of ['propertyPhotos','dealDocuments']){
+      attachments[field]=[...(attachments[field]||[]),...await uploadDealAttachmentFiles(field,dealNewFiles[field],ownerUid,d.id,createdPaths)];
+    }
+    d.propertyPhotos=attachments.propertyPhotos;
+    d.dealDocuments=attachments.dealDocuments;
     await saveRecordToOwner('deals', d, ownerUid);
-    if(isEditing && previousOwnerUid !== ownerUid){
+    if(ownerChanged){
       try { await deleteRecordToOwner('deals', d.id, previousOwnerUid); }
       catch(deleteError){
-        try { await deleteRecordToOwner('deals', d.id, ownerUid); } catch(rollbackError){ console.warn('Could not roll back moved deal:', rollbackError); }
+        try { await deleteRecordToOwner('deals', d.id, ownerUid); }
+        catch(rollbackError){ dealCommitted=true; console.warn('Could not roll back moved deal:',rollbackError); }
         throw deleteError;
       }
     }
+    dealCommitted=true;
+    if(oldPathsToDelete.length){
+      try { await deleteDealAttachmentPaths(oldPathsToDelete); }
+      catch(cleanupError){ console.warn('Could not remove unlinked deal images:',cleanupError); }
+    }
+    let savedDeal=d;
+    try { savedDeal=(await refreshSignedDealAttachments([d]))[0] || d; }
+    catch(signError){ console.warn('Could not refresh saved deal image URLs:',signError); }
     if(isEditing){
-      const index = state.deals.findIndex(item => sameId(item.id, d.id));
-      if(index >= 0) state.deals[index] = d;
-    } else state.deals.unshift(d);
-  } catch(e){ notify('خطا در ذخیره معامله: '+e.message,'var(--red)'); return; }
+      const index=state.deals.findIndex(item=>sameId(item.id,d.id));
+      if(index>=0) state.deals[index]=savedDeal;
+    } else state.deals.unshift(savedDeal);
+  } catch(e){
+    if(!dealCommitted){
+      try { await deleteDealAttachmentPaths(createdPaths); }
+      catch(cleanupError){ console.warn('Could not clean up uploaded deal images after save failure:',cleanupError); }
+    }
+    notify('خطا در ذخیره معامله: '+e.message,'var(--red)'); return;
+  }
   editingDealId = null;
   closeModal('deal-modal');
+  resetDealAttachments();
   clearForm(['d-title','d-price','d-commission','d-advisor','d-date','d-client']);
   renderDeals(); updateCounts();
   notify(isEditing ? 'اطلاعات معامله ویرایش شد ✅' : 'معامله با موفقیت ثبت شد ✅');
@@ -4773,8 +5024,9 @@ function renderDeals(){
     <td>${escapeHTML(d.advisor||'—')}</td>
     <td data-label="تاریخ" style="color:var(--text2)">${escapeHTML(siteDateDisplay(d.date)||'—')}</td>
     <td style="display:flex;gap:6px;">
+      <button class="btn btn-ghost btn-sm" data-deal-id="${escapeHTML(String(d.id))}" onclick="openDealDetails(this.dataset.dealId)" title="نمایش جزئیات و تصاویر">🔍</button>
       <button class="btn btn-ghost btn-sm" data-deal-id="${escapeHTML(String(d.id))}" onclick="openEditDeal(this.dataset.dealId)" title="ویرایش معامله">✏️</button>
-      <button class="btn btn-danger btn-sm" data-deal-id="${escapeHTML(String(d.id))}" onclick="deleteDeal(this.dataset.dealId)">🗑</button>
+      <button class="btn btn-danger btn-sm" data-deal-id="${escapeHTML(String(d.id))}" onclick="deleteDeal(this.dataset.dealId)" title="حذف معامله">🗑</button>
     </td>
   </tr>`).join('')}
   </tbody></table>`;
@@ -4784,9 +5036,12 @@ async function deleteDeal(id){
   const deal = state.deals.find(item => sameId(item.id, id));
   if(!deal) return;
   const ownerUid = recordOwnerForCurrentView(deal, currentUser.id);
+  const attachmentPaths=['propertyPhotos','dealDocuments'].flatMap(field=>(deal[field]||[]).map(item=>item?.path).filter(Boolean));
   try {
     await deleteRecordToOwner('deals', deal.id, ownerUid);
     state.deals = state.deals.filter(item => !sameId(item.id, deal.id) || String(item._uid || item.userId || currentUser.id) !== String(ownerUid));
+    try { await deleteDealAttachmentPaths(attachmentPaths); }
+    catch(cleanupError){ console.warn('Could not remove deleted deal images:',cleanupError); }
     renderDeals(); updateCounts();
     notify('معامله حذف شد','var(--red)');
   } catch(error){ notify('خطا در حذف معامله: '+error.message,'var(--red)'); }
