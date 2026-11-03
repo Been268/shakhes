@@ -371,6 +371,12 @@
   .form-grid.single { grid-template-columns: 1fr; }
   .form-group { display: flex; flex-direction: column; gap: 6px; }
   .form-group.full { grid-column: 1/-1; }
+  .money-words-hint { display:block; min-height:0; color:var(--text3); font-size:11px; line-height:1.6; }
+  .money-display { display:inline-flex; flex-direction:column; align-items:flex-start; gap:2px; line-height:1.5; }
+  .money-display-number { font-weight:600; }
+  .money-words-display { display:block; color:var(--text3); font-size:10px; font-weight:400; white-space:normal; }
+  .budget-money-item { margin:3px 0; }
+  .budget-money-item > span:first-child { display:block; color:var(--text3); font-size:10px; margin-bottom:2px; }
   label { font-size: 12px; color: var(--text2); font-weight: 600; }
   input, select, textarea {
     background: var(--surface2); border: 1px solid var(--border);
@@ -2563,7 +2569,7 @@ function renderProfilePage(){
       <div class="admin-stat"><div class="admin-stat-val" style="color:var(--blue)">${myProps}</div><div class="admin-stat-lbl">ملک ثبت شده</div></div>
       <div class="admin-stat"><div class="admin-stat-val" style="color:var(--purple)">${myClients}</div><div class="admin-stat-lbl">مشتری</div></div>
       <div class="admin-stat"><div class="admin-stat-val" style="color:var(--green)">${myDeals}</div><div class="admin-stat-lbl">معامله</div></div>
-      <div class="admin-stat"><div class="admin-stat-val" style="color:var(--accent)">${myComm>0?fmt(Math.round(myComm/1000000))+'M':'۰'}</div><div class="admin-stat-lbl">کمیسیون (ت)</div></div>
+      <div class="admin-stat"><div class="admin-stat-val" style="color:var(--accent)">${myComm>0?moneyHTML(Math.round(myComm)):'۰'}</div><div class="admin-stat-lbl">کمیسیون (تومان)</div></div>
     </div>
   `;
 }
@@ -2762,6 +2768,7 @@ function openModal(id){
   modal.classList.add('open');
   modal.style.display = 'flex';
   modal.setAttribute('aria-hidden', 'false');
+  refreshMoneyWordInputs(modal);
 }
 function closeModal(id){
   const modal = document.getElementById(id);
@@ -2880,6 +2887,112 @@ function jalaliWeekday(year, month, day = 1){
 function fmt(n) {
   if(!n) return '۰';
   return Number(n).toLocaleString('fa-IR');
+}
+
+// تبدیل عدد به حروف فارسی برای نمایش مبلغ‌ها در فرم‌ها، پرونده‌ها و گزارش‌ها.
+const MONEY_INPUT_IDS = new Set([
+  'filter-price-min','filter-price-max','calc-price',
+  'p-price','p-mortgage','p-rent','p-price-per-m','v-price-per-m','l-price-per-m','cm-price-per-m','pt-price-per-m',
+  'c-budget','c-price-per-m','c-rent-max','c-deposit-max',
+  'd-price','d-commission','inc-amount','ct-final-price'
+]);
+const MONEY_INPUT_UNITS = {
+  'p-rent':'تومان در ماه','c-rent-max':'تومان در ماه',
+  'p-price-per-m':'تومان برای هر متر مربع','v-price-per-m':'تومان برای هر متر مربع',
+  'l-price-per-m':'تومان برای هر متر مربع','cm-price-per-m':'تومان برای هر متر مربع',
+  'pt-price-per-m':'تومان برای هر متر مربع','c-price-per-m':'تومان برای هر متر مربع'
+};
+const PERSIAN_ONES = ['','یک','دو','سه','چهار','پنج','شش','هفت','هشت','نه'];
+const PERSIAN_TEENS = ['ده','یازده','دوازده','سیزده','چهارده','پانزده','شانزده','هفده','هجده','نوزده'];
+const PERSIAN_TENS = ['','','بیست','سی','چهل','پنجاه','شصت','هفتاد','هشتاد','نود'];
+const PERSIAN_HUNDREDS = ['','صد','دویست','سیصد','چهارصد','پانصد','ششصد','هفتصد','هشتصد','نهصد'];
+const PERSIAN_SCALES = ['', 'هزار', 'میلیون', 'میلیارد', 'تریلیون', 'کوادریلیون'];
+
+function threeDigitWords(value){
+  let n = Number(value) || 0;
+  const parts = [];
+  const hundred = Math.floor(n / 100);
+  n %= 100;
+  if(hundred) parts.push(PERSIAN_HUNDREDS[hundred]);
+  if(n >= 10 && n < 20) parts.push(PERSIAN_TEENS[n - 10]);
+  else {
+    const ten = Math.floor(n / 10);
+    const one = n % 10;
+    if(ten) parts.push(PERSIAN_TENS[ten]);
+    if(one) parts.push(PERSIAN_ONES[one]);
+  }
+  return parts.join(' و ');
+}
+
+function numberToPersianWords(value){
+  if(value === null || value === undefined || String(value).trim() === '') return '';
+  const numeric = toNumber(value);
+  if(!Number.isFinite(numeric)) return '';
+  let amount = BigInt(Math.round(Math.abs(numeric)));
+  if(amount === 0n) return 'صفر';
+  const negative = numeric < 0;
+  const groups = [];
+  while(amount > 0n && groups.length < PERSIAN_SCALES.length){
+    groups.push(Number(amount % 1000n));
+    amount /= 1000n;
+  }
+  if(amount > 0n) return 'مبلغ بسیار بزرگ';
+  const parts = [];
+  for(let i = groups.length - 1; i >= 0; i--){
+    if(!groups[i]) continue;
+    const scale = PERSIAN_SCALES[i];
+    parts.push(`${threeDigitWords(groups[i])}${scale ? ` ${scale}` : ''}`);
+  }
+  return `${negative ? 'منفی ' : ''}${parts.join(' و ')}`;
+}
+
+function moneyUnitForKey(key=''){
+  const normalized = String(key).toLowerCase();
+  if(normalized.includes('price-per-m')) return 'تومان برای هر متر مربع';
+  if(normalized.includes('rent')) return 'تومان در ماه';
+  return 'تومان';
+}
+
+function moneyHTML(value, unit='تومان'){
+  if(value === null || value === undefined || String(value).trim() === '') return '—';
+  const words = numberToPersianWords(value);
+  return `<span class="money-display"><span class="money-display-number">${fmt(toNumber(value))} ${unit}</span>${words ? `<small class="money-words-display">به حروف: ${words} ${unit}</small>` : ''}</span>`;
+}
+
+function moneyText(value, unit='تومان'){
+  if(value === null || value === undefined || String(value).trim() === '') return '—';
+  const words = numberToPersianWords(value);
+  return `${fmt(toNumber(value))} ${unit}${words ? ` (${words} ${unit})` : ''}`;
+}
+
+function updateMoneyInputWords(input){
+  if(!input || !MONEY_INPUT_IDS.has(input.id)) return;
+  const group = input.closest('.form-group') || input.parentElement;
+  if(!group) return;
+  let hint = group.querySelector(`.money-words-hint[data-money-words-for="${input.id}"]`);
+  if(!hint){
+    hint = document.createElement('small');
+    hint.className = 'money-words-hint';
+    hint.dataset.moneyWordsFor = input.id;
+    hint.setAttribute('aria-live', 'polite');
+    group.appendChild(hint);
+  }
+  const words = numberToPersianWords(input.value);
+  hint.textContent = words ? `به حروف: ${words} ${MONEY_INPUT_UNITS[input.id] || 'تومان'}` : '';
+}
+
+function refreshMoneyWordInputs(root=document){
+  if(root && root.matches && root.matches('input[type="number"]')) updateMoneyInputWords(root);
+  if(root && root.querySelectorAll) root.querySelectorAll('input[type="number"]').forEach(updateMoneyInputWords);
+}
+
+document.addEventListener('input', event => updateMoneyInputWords(event.target));
+if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => refreshMoneyWordInputs(document));
+else refreshMoneyWordInputs(document);
+
+function setMoneyDisplay(id, value, unit='تومان'){
+  const element = document.getElementById(id);
+  if(element) element.innerHTML = moneyHTML(value, unit);
 }
 
 // --- PROPERTY TYPE SELECTION ---
@@ -3184,7 +3297,7 @@ function propertyDetailValue(value, key=''){
     return Object.entries(value).map(([k,v]) => `${escapeHTML(k)}: ${escapeHTML(String(v))}`).join('، ');
   }
   const text = String(value);
-  if(/price|rent|mortgage/i.test(key) && /^[-+]?\d+(\.\d+)?$/.test(text)) return `${fmt(text)} تومان`;
+  if(/price|rent|mortgage/i.test(key) && /^[-+]?\d+(\.\d+)?$/.test(text)) return moneyHTML(text, moneyUnitForKey(key));
   return escapeHTML(text).replace(/\n/g, '<br>');
 }
 
@@ -3222,10 +3335,10 @@ function openPropertyDetails(id){
     propertyDetailCard('نام مالک', propertyDetailValue(p.ownerName)),
     p.ownerPhone ? propertyDetailCard('شماره تماس مالک', `<a href="tel:${safePhone(p.ownerPhone)}" style="color:var(--blue);text-decoration:none;direction:ltr;display:inline-block;">${escapeHTML(p.ownerPhone)}</a>`) : '',
     address ? propertyDetailCard('آدرس', propertyDetailValue(address), 'property-detail-wide') : '',
-    p.price ? propertyDetailCard('قیمت فروش', `${fmt(p.price)} تومان`) : '',
-    p.mortgage ? propertyDetailCard('مبلغ رهن', `${fmt(p.mortgage)} تومان`) : '',
-    p.rent ? propertyDetailCard('اجاره ماهیانه', `${fmt(p.rent)} تومان`) : '',
-    p.pricePerMeter ? propertyDetailCard('قیمت هر متر', `${fmt(p.pricePerMeter)} تومان`) : ''
+    p.price ? propertyDetailCard('قیمت فروش', moneyHTML(p.price)) : '',
+    p.mortgage ? propertyDetailCard('مبلغ رهن', moneyHTML(p.mortgage)) : '',
+    p.rent ? propertyDetailCard('اجاره ماهیانه', moneyHTML(p.rent, 'تومان در ماه')) : '',
+    p.pricePerMeter ? propertyDetailCard('قیمت هر متر', moneyHTML(p.pricePerMeter, 'تومان برای هر متر مربع')) : ''
   ].join('');
 
   const extra = extraEntries.map(([key,value]) => propertyDetailCard(propertyDetailFallbackLabel(key), propertyDetailValue(value, key))).join('');
@@ -3652,12 +3765,7 @@ function renderProperties(){
     </td>
     <td>${escapeHTML(p.type)}</td>
     <td>${p.extra&&p.extra.area?escapeHTML(p.extra.area)+' م²':(p.extra&&p.extra.land?escapeHTML(p.extra.land)+' م²':'—')}</td>
-    <td style="color:var(--accent)">${
-      p.status==='mortgage' ? (p.mortgage?'رهن: '+fmt(p.mortgage)+' ت':'—') :
-      (p.status==='rent'||p.status==='rent_mortgage') ?
-        ((p.mortgage?'رهن: '+fmt(p.mortgage)+' ت':'')+(p.mortgage&&p.rent?' | ':'')+(p.rent?'اجاره: '+fmt(p.rent)+' ت':'')) || '—' :
-      (p.price?fmt(p.price)+' ت':'—')
-    }</td>
+    <td style="color:var(--accent)">${propertyPriceHTML(p)}</td>
     <td>${statusMap[p.status]||p.status}</td>
     <td>
       ${approvalMap[approval]||approval}
@@ -3731,6 +3839,19 @@ async function setApproval(id, newStatus){
   } catch(e){ notify('خطا در بروزرسانی: '+e.message, 'var(--red)'); }
 }
 
+function propertyPriceHTML(p){
+  const rows = [];
+  if(p.status === 'mortgage'){
+    if(p.mortgage) rows.push(`<div>رهن: ${moneyHTML(p.mortgage)}</div>`);
+  } else if(p.status === 'rent' || p.status === 'rent_mortgage'){
+    if(p.mortgage) rows.push(`<div>رهن: ${moneyHTML(p.mortgage)}</div>`);
+    if(p.rent) rows.push(`<div>اجاره: ${moneyHTML(p.rent, 'تومان در ماه')}</div>`);
+  } else if(p.price){
+    rows.push(moneyHTML(p.price));
+  }
+  return rows.join('') || '—';
+}
+
 // ساخت متن آگهی استاندارد از روی اطلاعات ملک
 function buildAdText(p){
   const statusLabel = {
@@ -3740,9 +3861,9 @@ function buildAdText(p){
   }[p.status] || p.status;
 
   let priceLine = '';
-  if(p.status==='mortgage') priceLine = `💰 مبلغ رهن: ${p.mortgage?fmt(p.mortgage)+' تومان':'توافقی'}`;
-  else if(p.status==='rent'||p.status==='rent_mortgage') priceLine = `💰 رهن: ${p.mortgage?fmt(p.mortgage)+' تومان':'-'} | اجاره: ${p.rent?fmt(p.rent)+' تومان':'-'}`;
-  else priceLine = `💰 قیمت: ${p.price?fmt(p.price)+' تومان':'توافقی'}`;
+  if(p.status==='mortgage') priceLine = `💰 مبلغ رهن: ${p.mortgage?moneyText(p.mortgage):'توافقی'}`;
+  else if(p.status==='rent'||p.status==='rent_mortgage') priceLine = `💰 رهن: ${p.mortgage?moneyText(p.mortgage):'-'} | اجاره: ${p.rent?moneyText(p.rent,'تومان در ماه'):'-'}`;
+  else priceLine = `💰 قیمت: ${p.price?moneyText(p.price):'توافقی'}`;
 
   let lines = [
     `🏠 ${p.title}`,
@@ -3750,7 +3871,7 @@ function buildAdText(p){
     priceLine,
   ];
   if(p.area) lines.push(`📐 متراژ: ${p.area} متر`);
-  if(p.pricePerMeter) lines.push(`📏 قیمت هر متر: ${fmt(p.pricePerMeter)} تومان`);
+  if(p.pricePerMeter) lines.push(`📏 قیمت هر متر: ${moneyText(p.pricePerMeter, 'تومان برای هر متر مربع')}`);
   if(p.notes) lines.push(`📝 توضیحات: ${p.notes}`);
   lines.push(`📞 تماس: ${p.ownerPhone||'—'}`);
   lines.push('', '— ثبت شده در سامانه املاک شاخص');
@@ -3972,6 +4093,7 @@ function updateClientFields() {
   }
 
   container.innerHTML = html;
+  refreshMoneyWordInputs(container);
 }
 
 function openEditClient(id){
@@ -4057,7 +4179,7 @@ function clientDetailValue(value, key=''){
   if(value === null || value === undefined || value === '') return '';
   if(typeof value === 'object') return Object.entries(value).map(([k,v]) => `${escapeHTML(k)}: ${escapeHTML(String(v))}`).join('، ');
   const text = String(value);
-  if(CLIENT_MONEY_KEYS.test(key) && /^[-+]?\d+(\.\d+)?$/.test(text)) return `${fmt(text)} تومان`;
+  if(CLIENT_MONEY_KEYS.test(key) && /^[-+]?\d+(\.\d+)?$/.test(text)) return moneyHTML(text, moneyUnitForKey(key));
   return escapeHTML(text).replace(/\n/g, '<br>');
 }
 
@@ -4106,24 +4228,24 @@ function renderClients(){
     'فروش':'🏷️','مشارکت در ساخت':'🏗️'
   };
 
-  const getBudgetLabel = (c) => {
+  const getBudgetHTML = (c) => {
     const d = c.dynFields || {};
     const req = c.request;
-    const fmt2 = n => n ? Number(n).toLocaleString('fa-IR') + ' ت' : null;
+    const item = (label, n, unit='تومان') => n ? `<div class="budget-money-item"><span>${escapeHTML(label)}</span>${moneyHTML(n, unit)}</div>` : null;
     if(req==='اجاره') {
       const parts = [];
-      if(d.deposit) parts.push('ودیعه: '+fmt2(d.deposit));
-      if(d['rent-max']) parts.push('اجاره: '+fmt2(d['rent-max']));
-      if(d.budget) parts.push('ودیعه: '+fmt2(d.budget));
-      return parts.join(' | ') || (c.budget ? fmt2(c.budget) : '—');
+      if(d.deposit) parts.push(item('ودیعه:', d.deposit));
+      if(d['rent-max']) parts.push(item('اجاره ماهیانه:', d['rent-max'], 'تومان در ماه'));
+      if(d.budget) parts.push(item('ودیعه:', d.budget));
+      return parts.join('') || (c.budget ? item('ودیعه:', c.budget) : '—');
     }
     if(req==='رهن و اجاره') {
       const parts = [];
-      if(d.budget) parts.push('رهن: '+fmt2(d.budget));
-      if(d['rent-max']) parts.push('اجاره: '+fmt2(d['rent-max']));
-      return parts.join(' | ') || '—';
+      if(d.budget) parts.push(item('رهن:', d.budget));
+      if(d['rent-max']) parts.push(item('اجاره ماهیانه:', d['rent-max'], 'تومان در ماه'));
+      return parts.join('') || '—';
     }
-    return d.budget ? fmt2(d.budget) : (c.budget ? fmt2(c.budget) : '—');
+    return d.budget ? item('بودجه:', d.budget) : (c.budget ? item('بودجه:', c.budget) : '—');
   };
 
   const getDetails = (c) => {
@@ -4145,7 +4267,7 @@ function renderClients(){
     <td><b>${escapeHTML(c.name)}</b>${c.source?`<br><span style="font-size:10px;color:var(--text3)">${escapeHTML(c.source)}</span>`:''}</td>
     <td><a href="tel:${safePhone(c.phone)}" style="color:var(--blue)">${escapeHTML(c.phone||'—')}</a></td>
     <td><span class="badge badge-blue">${reqIcon[c.request]||''} ${escapeHTML(c.request)}</span></td>
-    <td style="color:var(--green);font-size:12px;">${escapeHTML(getBudgetLabel(c))}</td>
+    <td style="color:var(--green);font-size:12px;">${getBudgetHTML(c)}</td>
     <td style="font-size:12px;color:var(--text2)">${escapeHTML(getDetails(c))}</td>
     <td>${escapeHTML(c.area||'—')}</td>
     <td>${prMap[c.priority]||''}</td>
@@ -4373,8 +4495,8 @@ function renderDeals(){
   ${state.deals.map(d=>`<tr>
     <td><b>${escapeHTML(d.title||'بدون عنوان')}</b></td>
     <td><span class="badge badge-blue">${escapeHTML(d.type||'—')}</span></td>
-    <td style="color:var(--accent)">${d.price?fmt(d.price)+' ت':'—'}</td>
-    <td style="color:var(--green)">${d.commission?fmt(d.commission)+' ت':'—'}</td>
+    <td style="color:var(--accent)">${d.price?moneyHTML(d.price):'—'}</td>
+    <td style="color:var(--green)">${d.commission?moneyHTML(d.commission):'—'}</td>
     <td>${escapeHTML(d.advisor||'—')}</td>
     <td data-label="تاریخ" style="color:var(--text2)">${escapeHTML(siteDateDisplay(d.date)||'—')}</td>
     <td style="display:flex;gap:6px;">
@@ -4489,11 +4611,11 @@ function calcCommission(){
   const taxVal = total * tax / 100;
   const adv = (total + taxVal) * advPct / 100;
   document.getElementById('calc-result').style.display='block';
-  document.getElementById('calc-total').textContent = fmt(Math.round(total+taxVal)) + ' تومان';
-  document.getElementById('calc-seller').textContent = fmt(Math.round(seller)) + ' ت';
-  document.getElementById('calc-buyer').textContent = fmt(Math.round(buyer)) + ' ت';
-  document.getElementById('calc-adv').textContent = fmt(Math.round(adv)) + ' ت';
-  document.getElementById('calc-tax-val').textContent = fmt(Math.round(taxVal)) + ' ت';
+  setMoneyDisplay('calc-total', Math.round(total+taxVal));
+  setMoneyDisplay('calc-seller', Math.round(seller));
+  setMoneyDisplay('calc-buyer', Math.round(buyer));
+  setMoneyDisplay('calc-adv', Math.round(adv));
+  setMoneyDisplay('calc-tax-val', Math.round(taxVal));
 }
 
 // --- CALENDAR ---
@@ -4631,7 +4753,7 @@ function renderDashboard(){
   document.getElementById('dash-clients').textContent = state.clients.length;
   document.getElementById('dash-deals').textContent = state.deals.length;
   const totalComm = state.deals.reduce((s,d)=>s+toNumber(d.commission),0);
-  document.getElementById('dash-commission').textContent = totalComm>0?fmt(Math.round(totalComm/1000000))+'M':'۰';
+  document.getElementById('dash-commission').innerHTML = totalComm>0?moneyHTML(Math.round(totalComm)):'۰';
 
   // Latest properties
   const propEl = document.getElementById('dash-prop-list');
@@ -4653,12 +4775,7 @@ function renderDashboard(){
     propEl.innerHTML=`<table><thead><tr><th>عنوان</th><th>نوع</th><th>قیمت</th><th>وضعیت</th></tr></thead><tbody>
     ${state.properties.slice(0,5).map(p=>`<tr>
       <td><b>${escapeHTML(p.title||'بدون عنوان')}</b></td><td>${escapeHTML(p.type||'—')}</td>
-      <td style="color:var(--accent)">${
-      p.status==='mortgage' ? (p.mortgage?'رهن: '+fmt(p.mortgage)+' ت':'—') :
-      (p.status==='rent'||p.status==='rent_mortgage') ?
-        ((p.mortgage?'رهن: '+fmt(p.mortgage)+' ت':'')+(p.mortgage&&p.rent?' | ':'')+(p.rent?'اجاره: '+fmt(p.rent)+' ت':'')) || '—' :
-      (p.price?fmt(p.price)+' ت':'—')
-    }</td>
+      <td style="color:var(--accent)">${propertyPriceHTML(p)}</td>
       <td>${statusMap[p.status]||escapeHTML(p.status||'—')}</td>
     </tr>`).join('')}</tbody></table>`;
   }
@@ -4705,7 +4822,7 @@ function matchProperties(clientId) {
 
   var budgetValue = toNumber(client.budget);
   var areaValue = toNumber(client.area);
-  var budget = budgetValue ? fmt(budgetValue) + ' ت' : 'نامشخص';
+  var budget = budgetValue ? moneyHTML(budgetValue) : 'نامشخص';
   var area = areaValue ? fmt(areaValue) + ' متر' : 'نامشخص';
   document.getElementById('match-client-info').innerHTML =
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
@@ -4800,7 +4917,6 @@ function matchProperties(clientId) {
   top.forEach(function(item) {
     var p = item.prop;
     var scoreColor = item.score >= 70 ? '#4caf50' : item.score >= 50 ? 'var(--accent)' : '#888';
-    var priceStr = p.price ? fmt(p.price)+' ت' : p.mortgage ? 'رهن: '+fmt(p.mortgage)+' ت' : '—';
     var areaStr = getPropArea(p) ? fmt(getPropArea(p))+' متر' : '—';
     html += '<div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px;border:1px solid var(--border);display:flex;gap:12px;align-items:flex-start;">' +
       '<div style="min-width:52px;text-align:center;">' +
@@ -4808,7 +4924,8 @@ function matchProperties(clientId) {
       '<div style="font-size:10px;opacity:.6;">از ۱۰۰</div></div>' +
       '<div style="flex:1;">' +
       '<div style="font-weight:600;margin-bottom:4px;">' + escapeHTML(p.title||'بدون عنوان') + '</div>' +
-      '<div style="font-size:12px;opacity:.7;margin-bottom:6px;">' + escapeHTML(p.type||'—') + ' | ' + escapeHTML(priceStr) + ' | ' + escapeHTML(areaStr) + '</div>' +
+      '<div style="font-size:12px;opacity:.7;margin-bottom:6px;">' + escapeHTML(p.type||'—') + ' | ' + escapeHTML(areaStr) + '</div>' +
+      '<div style="font-size:12px;margin-bottom:6px;">' + propertyPriceHTML(p) + '</div>' +
       '<div style="font-size:12px;color:' + scoreColor + ';">✓ ' + escapeHTML(item.reason) + '</div>' +
       '</div></div>';
   });
@@ -5181,9 +5298,9 @@ function renderPriceHistory(){
       return '<tr>' +
         '<td data-label="ملک"><b>'+escapeHTML(r.propTitle||'بدون عنوان')+'</b></td>' +
         '<td data-label="نوع قیمت">'+escapeHTML(r.priceLabel || 'قیمت فروش')+'</td>' +
-        '<td data-label="قیمت قدیم" style="color:var(--text2);">'+fmt(r.oldPrice)+' ت</td>' +
-        '<td data-label="قیمت جدید" style="color:var(--accent);">'+fmt(r.newPrice)+' ت</td>' +
-        '<td data-label="تغییر" style="color:'+(up?'#4ade80':'var(--red)')+';">'+(up?'▲ ':'▼ ')+fmt(Math.abs(toNumber(r.diff)))+' ت</td>' +
+        '<td data-label="قیمت قدیم" style="color:var(--text2);">'+moneyHTML(r.oldPrice)+'</td>' +
+        '<td data-label="قیمت جدید" style="color:var(--accent);">'+moneyHTML(r.newPrice)+'</td>' +
+        '<td data-label="تغییر" style="color:'+(up?'#4ade80':'var(--red)')+';">'+(up?'▲ ':'▼ ')+moneyHTML(Math.abs(toNumber(r.diff)))+'</td>' +
         '<td data-label="تاریخ">'+escapeHTML(siteDateDisplay(r.date)||'—')+'</td>' +
       '</tr>';
     }).join('') +
@@ -5264,7 +5381,7 @@ function renderAccounting(){
   const commission = monthTxs.filter(t=>t.type==='commission').reduce((s,t)=>s+t.amount,0);
   const profit = income + commission - expense;
 
-  const setEl = (id, val, color) => { const e=document.getElementById(id); if(e){ e.textContent=fmt(val)+' ت'; if(color) e.style.color=color; } };
+  const setEl = (id, val, color) => { const e=document.getElementById(id); if(e){ e.innerHTML=moneyHTML(val); if(color) e.style.color=color; } };
   setEl('acc-income', income, '#4ade80');
   setEl('acc-expense', expense, 'var(--red)');
   setEl('acc-profit', profit, profit>=0?'#4ade80':'var(--red)');
@@ -5282,7 +5399,7 @@ function renderAccounting(){
     list.map(t => '<tr>' +
       '<td><span style="color:'+(typeColor[t.type]||'var(--text)')+';">'+(typeLabel[t.type]||t.type)+'</span></td>' +
       '<td><b>'+escapeHTML(t.title||'بدون عنوان')+'</b></td>' +
-      '<td style="color:'+(typeColor[t.type]||'var(--text)')+';">'+fmt(t.amount)+' ت</td>' +
+      '<td style="color:'+(typeColor[t.type]||'var(--text)')+';">'+moneyHTML(t.amount)+'</td>' +
       '<td>'+escapeHTML((state.advisors.find(a=>sameId(a.id,t.advisor))||{}).name||'آژانس')+'</td>' +
       '<td data-label="تاریخ">'+escapeHTML(toPersianDigits(normalizeAccountingDate(t.date) || '—'))+'</td>' +
       '<td style="color:var(--text2);font-size:11px;">'+escapeHTML(t.notes||'—')+'</td>' +
@@ -5361,7 +5478,7 @@ function renderReports(){
       const myProps = state.properties.filter(p=>p.userId===a.id).length;
       const myDeals = state.deals.filter(d=>d.advisor===a.name).length;
       const myComm = state.accounting ? state.accounting.filter(t=>t.advisor===a.id&&t.type==='commission').reduce((s,t)=>s+t.amount,0) : 0;
-      return '<tr><td><b>'+escapeHTML(a.name||'بدون نام')+'</b></td><td>'+myProps+'</td><td>'+myDeals+'</td><td style="color:var(--accent);">'+fmt(myComm)+' ت</td></tr>';
+      return '<tr><td><b>'+escapeHTML(a.name||'بدون نام')+'</b></td><td>'+myProps+'</td><td>'+myDeals+'</td><td style="color:var(--accent);">'+moneyHTML(myComm)+'</td></tr>';
     }).join('');
     advEl.innerHTML = '<table><thead><tr><th>مشاور</th><th>فایل‌ها</th><th>معاملات</th><th>کمیسیون</th></tr></thead><tbody>'+rows+'</tbody></table>';
   }
@@ -5478,6 +5595,7 @@ function generateContract(propId){
   const today = toPersianDigits(siteToday());
   document.getElementById('ct-date').value = today;
   document.getElementById('ct-final-price').value = _contractProp.price || _contractProp.mortgage || '';
+  refreshMoneyWordInputs(modal);
 
   const ctType = document.getElementById('ct-type');
   const statusToType = { sale:'sale', rent:'rent', mortgage:'mortgage', presale:'presale', rent_mortgage:'rent' };
@@ -5494,6 +5612,9 @@ function printContract(){
   const buyerPhone = document.getElementById('ct-buyer-phone').value || '___________';
   const buyerId = document.getElementById('ct-buyer-id').value || '___________';
   const finalPrice = document.getElementById('ct-final-price').value || p.price || p.mortgage || '___________';
+  const finalPriceDisplay = finalPrice === '___________'
+    ? '___________'
+    : `${fmt(toNumber(finalPrice))} تومان<br><small class="amount-words">به حروف: ${numberToPersianWords(finalPrice)} تومان</small>`;
   const extraNotes = document.getElementById('ct-extra-notes').value || '';
 
   const typeLabel = { sale:'فروش', rent:'اجاره', mortgage:'رهن کامل', presale:'پیش‌فروش' };
@@ -5516,6 +5637,7 @@ function printContract(){
   .field { flex:1; min-width:200px; }
   .field label { font-size:11px; color:#666; display:block; margin-bottom:3px; }
   .field .val { border-bottom:1px solid #999; padding:4px 2px; min-height:24px; font-size:13px; }
+  .amount-words { display:block; color:#555; font-size:11px; margin-top:3px; }
   .notes { border:1px solid #ccc; padding:12px; min-height:80px; border-radius:4px; font-size:12px; line-height:1.8; }
   .signatures { display:grid; grid-template-columns:1fr 1fr 1fr; gap:24px; margin-top:40px; }
   .sig-box { text-align:center; border:1px solid #ccc; padding:16px; border-radius:6px; }
@@ -5539,7 +5661,7 @@ function printContract(){
   </div>
   <div class="row">
     <div class="field"><label>متراژ</label><div class="val">${area} متر مربع</div></div>
-    <div class="field"><label>مبلغ مورد توافق</label><div class="val">${finalPrice} تومان</div></div>
+    <div class="field"><label>مبلغ مورد توافق</label><div class="val">${finalPriceDisplay}</div></div>
   </div>
 </div>
 
