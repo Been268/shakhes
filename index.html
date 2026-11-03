@@ -2034,6 +2034,11 @@
         <label>عنوان معامله</label>
         <input type="text" id="d-title" placeholder="مثال: فروش آپارتمان ولنجک">
       </div>
+      <div class="form-group full" style="grid-column:1/-1;">
+        <label>مشتری مرتبط (برای نمایش در نمودار مشتری)</label>
+        <select id="d-client"><option value="">بدون ارتباط با مشتری</option></select>
+        <small style="color:var(--text3);font-size:11px;">فقط معامله‌هایی که به مشتری وصل شوند در آمار همان مشتری شمرده می‌شوند.</small>
+      </div>
       <div class="form-group">
         <label>نوع معامله</label>
         <select id="d-type">
@@ -2306,8 +2311,9 @@ async function loadUserState(){
   if(currentUser.role === 'admin'){
     // admin: load ALL users' data
     const usersSnap = await backend().getDocs(backend().collection(backend().db, 'users'));
-    let props=[], clients=[], deals=[], tgPosts=[], reminders=[];
+    let props=[], clients=[], deals=[], tgPosts=[], reminders=[], clientActivities=[];
     const advisors = [];
+    state.followups=[]; state.priceHistory=[]; state.accounting=[];
     for(const uDoc of usersSnap.docs){
       const uid2 = uDoc.id;
       const profile = { ...uDoc.data(), id: uid2 };
@@ -2316,13 +2322,14 @@ async function loadUserState(){
         const s = await backend().getDocs(backend().collection(backend().db, `users/${uid2}/${col}`));
         return s.docs.map(d => ({ ...d.data(), id: d.id, _uid: uid2 }));
       };
-      const [p,c,d,t,r,fu,ph,ac] = await Promise.all([
+      const [p,c,d,t,r,fu,ph,ac,ca] = await Promise.all([
         load('properties'), load('clients'), load('deals'), load('tgposts'), load('reminders'),
-        load('followups'), load('priceHistory'), load('accounting')
+        load('followups'), load('priceHistory'), load('accounting'), load('clientActivities')
       ]);
       props=[...props,...p]; clients=[...clients,...c];
       deals=[...deals,...d]; tgPosts=[...tgPosts,...t];
       reminders=[...reminders,...r];
+      clientActivities=[...clientActivities,...ca];
       if(!state.followups) state.followups=[];
       if(!state.priceHistory) state.priceHistory=[];
       if(!state.accounting) state.accounting=[];
@@ -2336,11 +2343,12 @@ async function loadUserState(){
     state.deals      = deals;
     state.tgPosts    = tgPosts;
     state.reminders  = reminders;
+    state.clientActivities = clientActivities;
   } else {
     // مشاور فقط داده‌های عملیاتی مجاز خودش را می‌خواند؛ اطلاعات تلگرام و حسابداری آژانس مدیریتی هستند.
-    const [props, clients, deals, reminders, followups, priceHistory] = await Promise.all([
+    const [props, clients, deals, reminders, followups, priceHistory, clientActivities] = await Promise.all([
       loadCol('properties'), loadCol('clients'), loadCol('deals'),
-      loadCol('reminders'), loadCol('followups'), loadCol('priceHistory')
+      loadCol('reminders'), loadCol('followups'), loadCol('priceHistory'), loadCol('clientActivities')
     ]);
     state.properties  = await refreshSignedPropertyImages(props);
     state.clients     = clients;
@@ -2350,6 +2358,7 @@ async function loadUserState(){
     state.reminders   = reminders;
     state.followups   = followups;
     state.priceHistory= priceHistory;
+    state.clientActivities = clientActivities;
     state.accounting  = [];
   }
 }
@@ -2410,8 +2419,17 @@ async function saveRecordToOwner(col, data, ownerUid){
   if(!currentUser) throw new Error('کاربر وارد نشده است');
   const uid = String(ownerUid || currentUser.id);
   if(!isAdmin() && uid !== String(currentUser.id)) throw new Error('دسترسی ویرایش این رکورد را ندارید');
+  if(!isAdmin() && !ADVISOR_ALLOWED_COLLECTIONS.has(col)) throw new Error('ذخیره این نوع اطلاعات برای مشاور مجاز نیست');
   const { _uid, ...persisted } = data || {};
   await backend().setDoc(backend().doc(backend().db, `users/${uid}/${col}/${String(persisted.id)}`), _cleanObj(persisted));
+}
+
+async function deleteRecordToOwner(col, id, ownerUid){
+  if(!currentUser) throw new Error('کاربر وارد نشده است');
+  const uid = String(ownerUid || currentUser.id);
+  if(!isAdmin() && uid !== String(currentUser.id)) throw new Error('دسترسی حذف این رکورد را ندارید');
+  if(!isAdmin() && !ADVISOR_ALLOWED_COLLECTIONS.has(col)) throw new Error('حذف این نوع اطلاعات برای مشاور مجاز نیست');
+  await backend().deleteDoc(backend().doc(backend().db, `users/${uid}/${col}/${String(id)}`));
 }
 
 // delete a single document
@@ -2610,6 +2628,7 @@ let state = {
   clients: [],
   advisors: [],
   deals: [],
+  clientActivities: [],
   tgPosts: [],
   reminders: [],
   calMonth: Number(siteToday().split('/')[1]) - 1,
@@ -2618,7 +2637,7 @@ let state = {
 
 // Navigation and role access
 const ADMIN_ONLY_PAGES = new Set(['advisors','admin','telegram','accounting','reports']);
-const ADVISOR_ALLOWED_COLLECTIONS = new Set(['properties','clients','deals','reminders','followups','priceHistory']);
+const ADVISOR_ALLOWED_COLLECTIONS = new Set(['properties','clients','deals','reminders','followups','priceHistory','clientActivities']);
 function isAdmin(){ return !!currentUser && currentUser.role === 'admin'; }
 function canAccessPage(name){ return isAdmin() || !ADMIN_ONLY_PAGES.has(name); }
 function applyRoleAccess(){
@@ -2715,9 +2734,28 @@ function openNewAdvisorModal(){
   setModalMode('advisor-modal', '🤝 ثبت مشاور جدید', '💾 ذخیره');
   openModal('advisor-modal');
 }
-function openNewDealModal(){
+function populateDealClientOptions(selectedId=''){
+  const select = document.getElementById('d-client');
+  if(!select) return;
+  const options = (state.clients || []).map(client => {
+    const ownerUid = String(client._uid || client.userId || currentUser?.id || '');
+    const advisor = (state.advisors || []).find(item => sameId(item.id, ownerUid));
+    const ownerName = advisor?.fullname || advisor?.name || '';
+    const label = `${client.name || 'مشتری بدون نام'}${isAdmin() && ownerName ? ` — ${ownerName}` : ''}`;
+    return `<option value="${escapeHTML(String(client.id))}">${escapeHTML(label)}</option>`;
+  }).join('');
+  select.innerHTML = '<option value="">بدون ارتباط با مشتری</option>' + options;
+  select.value = String(selectedId || '');
+}
+function openDealFromClient(button){
+  const clientId = button?.dataset?.clientId || '';
+  closeModal('client-details-modal');
+  openNewDealModal(clientId);
+}
+function openNewDealModal(clientId=''){
   editingDealId = null;
   setFieldValue('d-title',''); setFieldValue('d-type','فروش'); setFieldValue('d-price',''); setFieldValue('d-commission',''); setFieldValue('d-advisor',''); setFieldValue('d-date',toPersianDigits(siteToday()));
+  populateDealClientOptions(clientId);
   setModalMode('deal-modal', '📋 ثبت معامله جدید', '💾 ذخیره');
   openModal('deal-modal');
 }
@@ -4201,10 +4239,12 @@ function openClientDetails(id){
   ].join('');
   const extra = dynEntries.map(([key,value]) => propertyDetailCard(clientDetailFallbackLabel(key), clientDetailValue(value, key))).join('');
   const notes = c.notes ? `<div class="property-detail-section"><div class="property-detail-section-title">📝 یادداشت و نکات مهم</div><div class="property-detail-notes">${propertyDetailValue(c.notes)}</div></div>` : '';
+  const activitySection = renderClientActivitySection(c);
   const reminderAction = c.reminderEnabled
     ? `<button class="btn btn-ghost btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="toggleClientReminder(this.dataset.clientId, false); closeModal('client-details-modal')">🔕 خاموش کردن یادآوری</button>`
     : `<button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="toggleClientReminder(this.dataset.clientId, true); closeModal('client-details-modal')">🔔 فعال کردن یادآوری</button>`;
   const editAction = `<button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="closeModal('client-details-modal'); openEditClient(this.dataset.clientId)">✏️ ویرایش مشتری</button>`;
+  const dealAction = `<button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="openDealFromClient(this)">📋 ثبت معامله</button>`;
 
   document.getElementById('client-details-title').textContent = `🔎 جزئیات مشتری — ${c.name || 'بدون نام'}`;
   document.getElementById('client-details-content').innerHTML = `
@@ -4212,9 +4252,205 @@ function openClientDetails(id){
     <div class="property-detail-section"><div class="property-detail-section-title">📋 اطلاعات اصلی</div><div class="property-detail-grid">${core || '<div class="property-detail-empty">اطلاعات اصلی ثبت نشده است</div>'}</div></div>
     ${extra ? `<div class="property-detail-section"><div class="property-detail-section-title">🎯 نیازمندی‌های مشتری</div><div class="property-detail-grid">${extra}</div></div>` : ''}
     ${notes}
-    <div style="display:flex;justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:14px;">${reminderAction}${editAction}</div>
+    ${activitySection}
+    <div style="display:flex;justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:14px;">${reminderAction}${editAction}${dealAction}</div>
   `;
   openModal('client-details-modal');
+  requestAnimationFrame(() => renderClientActivityChart(c));
+}
+
+const CLIENT_ACTIVITY_TYPES = {
+  call:'📞 تماس تلفنی', message:'💬 پیام خارج از چت', meeting:'🤝 جلسه', visit:'🏠 بازدید', note:'📝 یادداشت مهم'
+};
+const CLIENT_ACTIVITY_MONTH_NAMES = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
+let clientActivityChart = null;
+
+function clientActivityOwnerId(client){
+  if(client?._uid) return String(client._uid);
+  if(currentUser?.role === 'admin') return String(client?.userId || currentUser.id || '');
+  return String(currentUser?.id || client?.userId || '');
+}
+
+function recordOwnerForCurrentView(record, fallbackUid=''){
+  if(record?._uid) return String(record._uid);
+  if(currentUser?.role === 'admin') return String(record?.clientOwnerId || record?.userId || fallbackUid || currentUser.id || '');
+  return String(currentUser?.id || fallbackUid || '');
+}
+
+function clientActivityRecordMatches(record, client, ownerUid){
+  const recordOwner = String(record?._uid || record?.clientOwnerId || (currentUser?.role === 'admin' ? (record?.userId || ownerUid) : ownerUid));
+  return sameId(record?.clientId, client.id) && recordOwner === String(ownerUid);
+}
+
+function clientActivitySortValue(event){
+  const raw = event.createdAt;
+  if(typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if(typeof raw === 'string'){
+    if(/^\d{10,13}$/.test(raw)){
+      const n = Number(raw);
+      return n < 1000000000000 ? n * 1000 : n;
+    }
+    const parsed = Date.parse(raw);
+    if(Number.isFinite(parsed)) return parsed;
+  }
+  return Number(normalizeSiteDate(event.date || '').replace(/\D/g, '')) || 0;
+}
+
+function buildClientActivityEvents(client){
+  const ownerUid = clientActivityOwnerId(client);
+  const profileName = id => {
+    const profile = (state.advisors || []).find(item => sameId(item.id, id));
+    return profile?.fullname || profile?.name || '';
+  };
+  const events = [];
+
+  (state.clientActivities || []).filter(item => clientActivityRecordMatches(item, client, ownerUid)).forEach(item => {
+    const isReminderCompletion = item.type === 'reminder_completed';
+    events.push({
+      id:`manual:${item.id}`, sourceId:String(item.id), category:isReminderCompletion ? 'followup' : 'manual',
+      title:isReminderCompletion ? '✅ پیگیری مشتری انجام شد' : `${CLIENT_ACTIVITY_TYPES[item.type] || 'فعالیت مهم'} ثبت شد`,
+      detail:item.notes || item.description || '', date:item.date || '', createdAt:item.createdAt,
+      actor:item.createdByName || profileName(item.createdByUid), canDelete:true
+    });
+  });
+
+  const followupTypes = {call:'تماس تلفنی',visit:'بازدید ملک',meeting:'جلسه حضوری',message:'پیام',other:'سایر'};
+  const followupResults = {interested:'علاقه‌مند',not_interested:'علاقه‌مند نیست',thinking:'در حال تصمیم',visited:'بازدید انجام شد',deal:'نتیجه: معامله شد',no_answer:'پاسخ نداد'};
+  (state.followups || []).filter(item => clientActivityRecordMatches(item, client, ownerUid)).forEach(item => {
+    const result = followupResults[item.result] || item.result || '';
+    events.push({
+      id:`followup:${item.id}`, category:'followup',
+      title:`پیگیری انجام‌شده · ${followupTypes[item.type] || item.type || 'پیگیری'}`,
+      detail:[result, item.notes || ''].filter(Boolean).join(' · '),
+      nextDate:item.nextDate ? siteDateDisplay(item.nextDate) : '',
+      date:item.date || '', createdAt:item.createdAt,
+      actor:item.userName || profileName(item.userId || item._uid), canDelete:false
+    });
+  });
+
+  (state.deals || []).filter(item => clientActivityRecordMatches(item, client, ownerUid)).forEach(item => {
+    const priceHTML = item.price ? `قیمت نهایی: ${moneyHTML(item.price)}` : '';
+    events.push({
+      id:`deal:${item.id}`, category:'deal',
+      title:`معامله ثبت‌شده · ${item.title || 'بدون عنوان'}`,
+      detail:[item.type || 'معامله', priceHTML].filter(Boolean).join(' · '), detailIsHTML:true,
+      date:item.date || '', createdAt:item.createdAt,
+      actor:item.advisor || profileName(item._uid || item.userId), canDelete:false
+    });
+  });
+
+  return events.sort((a,b) => clientActivitySortValue(b) - clientActivitySortValue(a));
+}
+
+function renderClientActivitySection(client){
+  const events = buildClientActivityEvents(client);
+  const followupCount = events.filter(event => event.category === 'followup').length;
+  const dealCount = events.filter(event => event.category === 'deal').length;
+  const manualCount = events.filter(event => event.category === 'manual').length;
+  const stat = (label, value, color) => `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;"><div style="font-size:11px;color:var(--text3);">${label}</div><b style="display:block;margin-top:4px;font-size:18px;color:${color};">${toPersianDigits(value)}</b></div>`;
+  const timeline = events.length ? events.map(event => `
+    <div style="display:flex;gap:10px;align-items:flex-start;padding:11px 0;border-bottom:1px solid var(--border);">
+      <span style="width:9px;height:9px;border-radius:50%;background:${event.category === 'deal' ? 'var(--green)' : event.category === 'followup' ? 'var(--blue)' : 'var(--accent)'};margin-top:5px;flex:0 0 9px;"></span>
+      <div style="min-width:0;flex:1;">
+        <div style="font-weight:700;font-size:12px;">${escapeHTML(event.title)}</div>
+        ${event.detail ? `<div style="font-size:12px;color:var(--text2);margin-top:4px;line-height:1.8;">${event.detailIsHTML ? event.detail : escapeHTML(event.detail).replace(/\n/g,'<br>')}</div>` : ''}
+        ${event.nextDate ? `<div style="font-size:11px;color:var(--text3);margin-top:3px;">📅 پیگیری بعدی: ${escapeHTML(event.nextDate)} (در شمارش فعالیت‌ها جداگانه حساب نمی‌شود)</div>` : ''}
+        <div style="font-size:10px;color:var(--text3);margin-top:5px;">${escapeHTML(siteDateDisplay(event.date) || 'تاریخ نامشخص')}${event.actor ? ` · ثبت‌کننده: ${escapeHTML(event.actor)}` : ''}</div>
+      </div>
+      ${event.canDelete ? `<button class="btn btn-danger btn-sm" data-activity-id="${escapeHTML(event.sourceId)}" data-client-id="${escapeHTML(String(client.id))}" onclick="deleteClientActivity(this.dataset.activityId,this.dataset.clientId)" aria-label="حذف فعالیت">🗑</button>` : ''}
+    </div>`).join('') : '<div class="empty-state" style="padding:22px 0;"><div class="icon">📈</div><p>هنوز فعالیت مهمی برای این مشتری ثبت نشده است</p></div>';
+
+  return `<div class="property-detail-section" data-client-activity-panel>
+    <div class="property-detail-section-title">📈 فعالیت‌ها و روند مشتری</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px;margin-bottom:12px;">
+      ${stat('کل رویدادهای مهم', events.length, 'var(--text)')}
+      ${stat('پیگیری‌های انجام‌شده', followupCount, 'var(--blue)')}
+      ${stat('معاملات ثبت‌شده', dealCount, 'var(--green)')}
+      ${stat('ثبت‌های دستی', manualCount, 'var(--accent)')}
+    </div>
+    <div style="font-size:11px;color:var(--text3);line-height:1.8;margin-bottom:10px;">چت داخلی ثبت نمی‌شود. پیگیری‌های ثبت‌شده در بخش «پیگیری مشتریان» به‌عنوان اقدام انجام‌شده نمایش داده می‌شوند؛ تاریخ پیگیری بعدی جداست. معامله فقط وقتی شمرده می‌شود که در بخش معاملات به همین مشتری وصل شده باشد.</div>
+    <div style="position:relative;height:220px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:8px;margin-bottom:12px;"><canvas id="client-activity-chart" aria-label="نمودار ماهانه فعالیت‌های مشتری"></canvas></div>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:9px;">➕ ثبت فعالیت مهم</div>
+      <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:9px;">
+        <div class="form-group"><label>نوع فعالیت</label><select data-activity-type><option value="call">📞 تماس تلفنی</option><option value="message">💬 پیام خارج از چت</option><option value="meeting">🤝 جلسه</option><option value="visit">🏠 بازدید</option><option value="note">📝 یادداشت مهم</option></select></div>
+        <div class="form-group full" style="grid-column:1/-1;"><label>خلاصهٔ فعالیت</label><textarea data-activity-note maxlength="600" rows="2" placeholder="مثلاً نتیجه تماس، بازدید یا پیگیری مهم"></textarea></div>
+      </div>
+      <button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(client.id))}" onclick="saveClientActivity(this)">💾 ثبت فعالیت</button>
+    </div>
+    <div style="font-size:12px;font-weight:700;margin:12px 0 4px;">🕘 خط زمانی رویدادها</div>
+    <div style="max-height:360px;overflow:auto;">${timeline}</div>
+  </div>`;
+}
+
+function clientActivityMonths(){
+  const normalized = normalizeSiteDate(siteToday());
+  const [year, month] = normalized.split('/').map(Number);
+  const months = [];
+  for(let offset=5; offset>=0; offset--){
+    const serial = year * 12 + (month - 1) - offset;
+    const y = Math.floor(serial / 12);
+    const m = (serial % 12) + 1;
+    months.push({key:`${y}/${String(m).padStart(2,'0')}`, label:`${CLIENT_ACTIVITY_MONTH_NAMES[m-1]} ${toPersianDigits(y)}`});
+  }
+  return months;
+}
+
+function renderClientActivityChart(client){
+  const canvas = document.getElementById('client-activity-chart');
+  if(!canvas) return;
+  if(clientActivityChart){ clientActivityChart.destroy(); clientActivityChart = null; }
+  if(typeof Chart === 'undefined') return;
+  const events = buildClientActivityEvents(client);
+  const months = clientActivityMonths();
+  const count = category => months.map(month => events.filter(event => event.category === category && normalizeSiteDate(event.date || '').slice(0,7) === month.key).length);
+  try {
+    clientActivityChart = new Chart(canvas, {
+      type:'bar',
+      data:{labels:months.map(month => month.label),datasets:[
+        {label:'ثبت دستی',data:count('manual'),backgroundColor:'rgba(232,168,56,.78)',borderRadius:4},
+        {label:'پیگیری انجام‌شده',data:count('followup'),backgroundColor:'rgba(88,166,255,.78)',borderRadius:4},
+        {label:'معامله',data:count('deal'),backgroundColor:'rgba(63,185,80,.78)',borderRadius:4}
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{position:'bottom',rtl:true,labels:{color:'#c9d1d9',usePointStyle:true,boxWidth:8}},tooltip:{rtl:true}},scales:{x:{stacked:true,ticks:{color:'#9da7b3',maxRotation:0},grid:{display:false}},y:{stacked:true,beginAtZero:true,ticks:{color:'#9da7b3',precision:0},grid:{color:'rgba(139,148,158,.14)'}}}}
+    });
+  } catch(error){ console.warn('Could not render client activity chart:', error); }
+}
+
+async function saveClientActivity(button){
+  const client = state.clients.find(item => sameId(item.id, button?.dataset?.clientId));
+  const panel = button?.closest('[data-client-activity-panel]');
+  const notes = panel?.querySelector('[data-activity-note]')?.value.trim() || '';
+  const type = panel?.querySelector('[data-activity-type]')?.value || 'note';
+  if(!client){ notify('مشتری پیدا نشد','var(--red)'); return; }
+  if(!notes){ notify('خلاصهٔ فعالیت را وارد کنید','var(--red)'); return; }
+  const ownerUid = clientActivityOwnerId(client);
+  const now = Date.now();
+  const id = window.crypto?.randomUUID?.() || `activity-${now}-${Math.random().toString(36).slice(2,8)}`;
+  const activity = {id,clientId:String(client.id),clientName:client.name || '',type,notes,date:siteToday(),createdAt:new Date(now).toISOString(),createdByUid:currentUser.id,createdByName:currentUser.fullname || currentUser.email || '',userId:ownerUid};
+  if(button) button.disabled = true;
+  try {
+    await saveRecordToOwner('clientActivities', activity, ownerUid);
+    state.clientActivities = state.clientActivities || [];
+    state.clientActivities.unshift({...activity,_uid:ownerUid});
+    openClientDetails(client.id);
+    notify('فعالیت مشتری ثبت شد ✅');
+  } catch(error){
+    if(button) button.disabled = false;
+    notify('خطا در ثبت فعالیت: ' + error.message, 'var(--red)');
+  }
+}
+
+async function deleteClientActivity(id, clientId){
+  const activity = (state.clientActivities || []).find(item => sameId(item.id, id));
+  if(!activity || !confirm('این فعالیت از سابقهٔ مشتری حذف شود؟')) return;
+  const ownerUid = recordOwnerForCurrentView(activity);
+  try {
+    await deleteRecordToOwner('clientActivities', activity.id, ownerUid);
+    state.clientActivities = state.clientActivities.filter(item => !sameId(item.id, activity.id) || String(item._uid || item.userId || currentUser.id) !== ownerUid);
+    openClientDetails(clientId);
+    notify('فعالیت حذف شد');
+  } catch(error){ notify('خطا در حذف فعالیت: ' + error.message, 'var(--red)'); }
 }
 
 function renderClients(){
@@ -4333,31 +4569,49 @@ function renderClientReminders(){
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
         <button class="btn btn-ghost btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="openClientDetails(this.dataset.clientId)">جزئیات</button>
-        <button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="toggleClientReminder(this.dataset.clientId, false)">انجام شد</button>
+        <button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="toggleClientReminder(this.dataset.clientId, false, true)">انجام شد</button>
       </div>
     </div>
   `).join('');
   updateClientReminderBadge();
 }
 
-async function toggleClientReminder(id, enabled){
+async function toggleClientReminder(id, enabled, recordCompletion=false){
   const client = state.clients.find(c => String(c.id) === String(id));
   if(!client) return;
   const next = enabled === undefined ? !client.reminderEnabled : !!enabled;
-  const ownerUid = client._uid || client.userId || currentUser.id;
+  const ownerUid = clientActivityOwnerId(client);
+  const wasActive = !!client.reminderEnabled && client.reminderStatus !== 'completed';
+  const now = Date.now();
+  const completionActivity = recordCompletion && !next && wasActive ? {
+    id:`reminder-${client.id}-${now}`, clientId:String(client.id), clientName:client.name || '',
+    type:'reminder_completed', notes:'یادآوری مشتری به‌عنوان انجام‌شده علامت خورد', date:siteToday(),
+    createdAt:new Date(now).toISOString(), createdByUid:currentUser.id,
+    createdByName:currentUser.fullname || currentUser.email || '', userId:ownerUid
+  } : null;
+  let activitySaved = false;
   try {
+    if(completionActivity){
+      await saveRecordToOwner('clientActivities', completionActivity, ownerUid);
+      activitySaved = true;
+    }
     await backend().updateDoc(backend().doc(backend().db, `users/${ownerUid}/clients/${client.id}`), {
       reminderEnabled: next,
       reminderStatus: next ? 'active' : 'completed'
     });
+    if(completionActivity){
+      state.clientActivities = state.clientActivities || [];
+      state.clientActivities.unshift({...completionActivity,_uid:ownerUid});
+    }
     client.reminderEnabled = next;
     client.reminderStatus = next ? 'active' : 'completed';
     renderClients();
     renderClientReminders();
     renderDashboard();
     updateClientReminderBadge();
-    notify(next ? 'یادآوری مشتری فعال شد 🔔' : 'یادآوری مشتری خاموش شد');
+    notify(next ? 'یادآوری مشتری فعال شد 🔔' : (completionActivity ? 'پیگیری انجام‌شده در سابقهٔ مشتری ثبت شد ✅' : 'یادآوری مشتری خاموش شد'));
   } catch(e){
+    if(activitySaved){ try { await deleteRecordToOwner('clientActivities', completionActivity.id, ownerUid); } catch(rollbackError){ console.warn('Could not roll back reminder completion activity:', rollbackError); } }
     notify('خطا در تغییر یادآوری: ' + e.message, 'var(--red)');
   }
 }
@@ -4449,8 +4703,10 @@ function openEditDeal(id){
   const d = state.deals.find(item => sameId(item.id, id));
   if(!d) return;
   editingDealId = String(d.id);
+  populateDealClientOptions(d.clientId || '');
   setFieldValue('d-title', d.title || ''); setFieldValue('d-type', d.type || 'فروش');
   setFieldValue('d-price', d.price || ''); setFieldValue('d-commission', d.commission || '');
+  setFieldValue('d-client', d.clientId || '');
   setFieldValue('d-advisor', d.advisor || ''); setFieldValue('d-date', siteDateForInput(d.date));
   setModalMode('deal-modal', '✏️ ویرایش معامله', '💾 ذخیره تغییرات');
   openModal('deal-modal');
@@ -4463,19 +4719,35 @@ async function saveDeal(){
   if(!date){ notify('تاریخ معامله را به شکل ۱۴۰۵/۰۱/۰۱ وارد کنید','var(--red)'); return; }
   const existing = editingDealId ? state.deals.find(item => sameId(item.id, editingDealId)) : null;
   const isEditing = !!existing;
-  const ownerUid = existing?._uid || existing?.userId || currentUser.id;
+  const previousOwnerUid = recordOwnerForCurrentView(existing, currentUser.id);
+  const clientId = document.getElementById('d-client')?.value || '';
+  const linkedClient = clientId ? state.clients.find(item => sameId(item.id, clientId)) : null;
+  if(clientId && !linkedClient){ notify('مشتری انتخاب‌شده پیدا نشد؛ فهرست را تازه کنید','var(--red)'); return; }
+  const ownerUid = linkedClient ? clientActivityOwnerId(linkedClient) : previousOwnerUid;
+  if(!isAdmin() && ownerUid !== String(currentUser.id)){ notify('فقط می‌توانید معامله را به مشتری خودتان وصل کنید','var(--red)'); return; }
   const d = {
     ...(existing || {}),
-    id: isEditing ? existing.id : Date.now(), title,
+    id: isEditing ? existing.id : String(Date.now()), title,
     type: document.getElementById('d-type').value,
     price: document.getElementById('d-price').value,
     commission: document.getElementById('d-commission').value,
     advisor: document.getElementById('d-advisor').value,
     date,
-    userId: existing?.userId || ownerUid
+    clientId: linkedClient ? String(linkedClient.id) : '',
+    clientOwnerId: linkedClient ? ownerUid : '',
+    clientName: linkedClient?.name || '',
+    userId: ownerUid,
+    _uid: ownerUid
   };
   try {
     await saveRecordToOwner('deals', d, ownerUid);
+    if(isEditing && previousOwnerUid !== ownerUid){
+      try { await deleteRecordToOwner('deals', d.id, previousOwnerUid); }
+      catch(deleteError){
+        try { await deleteRecordToOwner('deals', d.id, ownerUid); } catch(rollbackError){ console.warn('Could not roll back moved deal:', rollbackError); }
+        throw deleteError;
+      }
+    }
     if(isEditing){
       const index = state.deals.findIndex(item => sameId(item.id, d.id));
       if(index >= 0) state.deals[index] = d;
@@ -4483,7 +4755,7 @@ async function saveDeal(){
   } catch(e){ notify('خطا در ذخیره معامله: '+e.message,'var(--red)'); return; }
   editingDealId = null;
   closeModal('deal-modal');
-  clearForm(['d-title','d-price','d-commission','d-advisor','d-date']);
+  clearForm(['d-title','d-price','d-commission','d-advisor','d-date','d-client']);
   renderDeals(); updateCounts();
   notify(isEditing ? 'اطلاعات معامله ویرایش شد ✅' : 'معامله با موفقیت ثبت شد ✅');
 }
@@ -4491,9 +4763,10 @@ async function saveDeal(){
 function renderDeals(){
   const el = document.getElementById('deals-table');
   if(!state.deals.length){ el.innerHTML='<div class="empty-state"><div class="icon">📋</div><p>هنوز معامله‌ای ثبت نشده</p></div>'; return; }
-  el.innerHTML = `<table><thead><tr><th>عنوان</th><th>نوع</th><th>قیمت نهایی</th><th>کمیسیون</th><th>مشاور</th><th>تاریخ</th><th>عملیات</th></tr></thead><tbody>
+  el.innerHTML = `<table><thead><tr><th>عنوان</th><th>مشتری مرتبط</th><th>نوع</th><th>قیمت نهایی</th><th>کمیسیون</th><th>مشاور</th><th>تاریخ</th><th>عملیات</th></tr></thead><tbody>
   ${state.deals.map(d=>`<tr>
     <td><b>${escapeHTML(d.title||'بدون عنوان')}</b></td>
+    <td data-label="مشتری مرتبط">${escapeHTML(d.clientName||'—')}</td>
     <td><span class="badge badge-blue">${escapeHTML(d.type||'—')}</span></td>
     <td style="color:var(--accent)">${d.price?moneyHTML(d.price):'—'}</td>
     <td style="color:var(--green)">${d.commission?moneyHTML(d.commission):'—'}</td>
@@ -4507,11 +4780,16 @@ function renderDeals(){
   </tbody></table>`;
 }
 
-function deleteDeal(id){
-  state.deals = state.deals.filter(d=>!sameId(d.id, id));
-  save('deals', state.deals);
-  renderDeals(); updateCounts();
-  notify('معامله حذف شد','var(--red)');
+async function deleteDeal(id){
+  const deal = state.deals.find(item => sameId(item.id, id));
+  if(!deal) return;
+  const ownerUid = recordOwnerForCurrentView(deal, currentUser.id);
+  try {
+    await deleteRecordToOwner('deals', deal.id, ownerUid);
+    state.deals = state.deals.filter(item => !sameId(item.id, deal.id) || String(item._uid || item.userId || currentUser.id) !== String(ownerUid));
+    renderDeals(); updateCounts();
+    notify('معامله حذف شد','var(--red)');
+  } catch(error){ notify('خطا در حذف معامله: '+error.message,'var(--red)'); }
 }
 
 // --- TELEGRAM ---
@@ -5083,7 +5361,9 @@ async function saveFollowup(){
   const existing = editingFollowupId ? state.followups.find(item => sameId(item.id, editingFollowupId)) : null;
   const isEditing = !!existing;
   const linkedClient = state.clients.find(c => sameId(c.id, clientId));
-  const ownerUid = existing?._uid || existing?.userId || currentUser.id;
+  if(!linkedClient){ notify('مشتری انتخاب‌شده پیدا نشد','var(--red)'); return; }
+  const previousOwnerUid = recordOwnerForCurrentView(existing, currentUser.id);
+  const ownerUid = clientActivityOwnerId(linkedClient);
   const fu = {
     ...(existing || {}),
     id: isEditing ? String(existing.id) : String(Date.now()),
@@ -5095,16 +5375,26 @@ async function saveFollowup(){
     nextDate,
     nextTime: document.getElementById('fu-next-time').value,
     date: existing?.date || siteToday(),
-    userId: existing?.userId || ownerUid,
+    userId: ownerUid,
+    createdByUid: existing?.createdByUid || currentUser.id,
+    userName: existing?.userName || currentUser.fullname || currentUser.email || '',
+    _uid: ownerUid,
     createdAt: existing?.createdAt || Date.now()
   };
   try {
     await saveRecordToOwner('followups', fu, ownerUid);
+    if(isEditing && previousOwnerUid !== ownerUid){
+      try { await deleteRecordToOwner('followups', fu.id, previousOwnerUid); }
+      catch(deleteError){
+        try { await deleteRecordToOwner('followups', fu.id, ownerUid); } catch(rollbackError){ console.warn('Could not roll back moved followup:', rollbackError); }
+        throw deleteError;
+      }
+    }
     const wasFinal = ['deal','not_interested'].includes(existing?.result);
     const becameFinal = ['deal','not_interested'].includes(fu.result) && !wasFinal;
     if(linkedClient && becameFinal && linkedClient.reminderEnabled){
       try {
-        const clientOwnerUid = linkedClient._uid || linkedClient.userId || currentUser.id;
+        const clientOwnerUid = clientActivityOwnerId(linkedClient);
         await backend().updateDoc(backend().doc(backend().db, `users/${clientOwnerUid}/clients/${linkedClient.id}`), { reminderEnabled:false, reminderStatus:'completed', reminderCompletedAt:new Date().toISOString() });
         linkedClient.reminderEnabled = false;
         linkedClient.reminderStatus = 'completed';
