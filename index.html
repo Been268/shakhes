@@ -945,6 +945,99 @@
   #dash-prop-list td:last-child{border-bottom:none!important}
   #dash-prop-list td:before{content:attr(data-label);flex:0 0 31%;color:var(--text3);font-size:10px;font-weight:600}
 }
+
+  /* Shakhes auth: editorial split-screen with an original CSS/SVG architectural illustration */
+  #auth-screen {
+    direction:ltr;flex-direction:row;align-items:center;justify-content:center;gap:14px;
+    padding:clamp(18px,4vw,48px);overflow-y:auto;
+    background:radial-gradient(ellipse at 15% 12%,rgba(215,164,91,.14),transparent 34%),radial-gradient(ellipse at 86% 88%,rgba(89,125,106,.12),transparent 30%),#0d1110;
+  }
+  .auth-box {
+    order:2;direction:rtl;flex:0 1 440px;width:min(440px,42vw);min-width:360px;max-width:440px;
+    min-height:min(680px,calc(100dvh - 80px));display:flex;flex-direction:column;justify-content:center;
+    padding:clamp(28px,4vw,48px);border:1px solid rgba(255,255,255,.7);border-radius:28px;
+    background:#f6f3ec;color:#202521;box-shadow:0 28px 90px rgba(0,0,0,.32);
+  }
+  .auth-logo {display:grid;grid-template-columns:58px 1fr;grid-template-rows:auto auto;column-gap:14px;align-items:center;text-align:right;margin-bottom:25px}
+  .auth-logo img {grid-column:1;grid-row:1/3;width:58px!important;height:58px!important;margin:0!important;padding:4px;display:block!important;border-radius:17px!important;background:#fff;box-shadow:0 5px 18px rgba(33,39,34,.12)}
+  .auth-logo h1 {grid-column:2;grid-row:1;margin:0!important;color:#1e2420;font-size:17px!important;font-weight:900;line-height:1.4}
+  .auth-logo p {grid-column:2;grid-row:2;margin:2px 0 0!important;color:#777c75;font-size:11px}
+  .auth-intro {margin-bottom:22px}
+  .auth-kicker {display:inline-flex;align-items:center;gap:7px;margin-bottom:7px;color:#a97837;font-size:11px;font-weight:800}
+  .auth-kicker:before {content:'';width:16px;height:1px;background:#c89958}
+  .auth-intro h2 {margin:0;color:#202521;font-size:25px;font-weight:900;letter-spacing:-.4px}
+  .auth-intro p {margin:6px 0 0;color:#727871;font-size:12px;line-height:1.8}
+  .auth-tabs {display:flex;gap:4px;padding:4px;margin:0 0 18px;border:1px solid #e8e3d9;border-radius:13px;background:#eeeae1}
+  .auth-tabs .auth-tab {padding:10px;border-radius:10px;color:#737970;font-size:13px}
+  .auth-tabs .auth-tab.active {background:#fff;color:#202521;box-shadow:0 3px 12px rgba(41,45,38,.1)}
+  .auth-form {display:flex;flex-direction:column;gap:13px}
+  .auth-field {display:flex;flex-direction:column;gap:6px;color:#535a53;font-size:11px;font-weight:800}
+  .auth-input-shell {display:flex;align-items:center;gap:10px;min-height:52px;padding:0 13px;border:1px solid #dedbd2;border-radius:14px;background:#fff;transition:border-color .18s,box-shadow .18s}
+  .auth-input-shell:focus-within {border-color:#bb8a4b;box-shadow:0 0 0 3px rgba(187,138,75,.13)}
+  .auth-input-shell svg {flex:0 0 18px;width:18px;height:18px;color:#999d96;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .auth-input-shell input {width:100%!important;min-width:0;min-height:50px!important;padding:10px 0!important;border:0!important;border-radius:0!important;outline:0!important;background:transparent!important;box-shadow:none!important;color:#252a26!important;font-family:'Vazirmatn',sans-serif;font-size:16px!important;text-align:left}
+  .auth-input-shell input::placeholder {color:#a5a8a1;opacity:1}
+  .auth-form-meta {display:flex;justify-content:flex-start;margin:-3px 0 1px}
+  .auth-link {padding:2px 0;border:0;background:none;color:#9a6d31;font-family:'Vazirmatn',sans-serif;font-size:11px;font-weight:800;cursor:pointer}
+  .auth-link:hover {color:#68471e;text-decoration:underline}
+  .auth-error {display:none;color:#b24436;font-size:11px;line-height:1.7;text-align:right}
+  .auth-btn {position:relative;display:flex;align-items:center;justify-content:center;min-height:52px;margin-top:3px;padding:13px 18px;border:1px solid #292f2b;border-radius:14px;background:linear-gradient(135deg,#282f2a,#171c19);color:#fbf8f0;font-family:'Vazirmatn',sans-serif;font-size:13px;font-weight:800;cursor:pointer;transition:transform .18s,border-color .18s,box-shadow .18s}
+  .auth-btn:after {content:'←';position:absolute;left:17px;color:#e1b675;font-family:Arial,sans-serif;font-size:18px;line-height:1}
+  .auth-btn:hover {transform:translateY(-1px);border-color:#b68b52;box-shadow:0 10px 24px rgba(30,35,30,.18)}
+  .auth-btn:disabled {opacity:.65;cursor:wait;transform:none}
+  .auth-secure-note {display:flex;align-items:center;gap:8px;margin-top:17px;color:#858a82;font-size:10px;line-height:1.6}
+  .auth-secure-note svg {flex:0 0 16px;width:16px;height:16px;fill:none;stroke:#a77a3e;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .auth-pending {padding:22px 0;text-align:center}
+  .auth-pending .icon {font-size:42px}
+  .auth-pending h3 {color:#222722;font-size:16px}
+  .auth-pending p {color:#6f756e}
+
+  .auth-visual {
+    order:1;position:relative;isolation:isolate;overflow:hidden;flex:1 1 560px;max-width:650px;min-width:320px;
+    min-height:min(680px,calc(100dvh - 80px));border:1px solid rgba(255,255,255,.1);border-radius:28px;
+    background:radial-gradient(ellipse at 28% 48%,rgba(183,131,65,.18),transparent 43%),linear-gradient(145deg,#1a211d 0%,#111614 56%,#101313 100%);color:#f6f2e9;
+  }
+  .auth-visual:before {content:'';position:absolute;inset:0;z-index:-1;background-image:linear-gradient(rgba(220,190,143,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(220,190,143,.08) 1px,transparent 1px);background-size:46px 46px;mask-image:linear-gradient(135deg,rgba(0,0,0,.82),transparent 88%)}
+  .auth-visual:after {content:'';position:absolute;z-index:-1;top:19%;left:-16%;width:54%;aspect-ratio:1;border:1px solid rgba(225,179,111,.18);border-radius:50%;box-shadow:0 0 0 24px rgba(225,179,111,.025),0 0 0 52px rgba(225,179,111,.02)}
+  .auth-visual-top {position:absolute;top:28px;right:30px;left:30px;z-index:2;display:flex;align-items:center;gap:10px;direction:rtl}
+  .auth-visual-mark {display:grid;place-items:center;width:40px;height:40px;border:1px solid rgba(221,177,112,.28);border-radius:14px;background:rgba(221,177,112,.1);color:#e0b36d}
+  .auth-visual-mark svg {width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  .auth-visual-brand {display:flex;flex-direction:column;gap:1px}
+  .auth-visual-brand strong {font-size:13px;font-weight:900;letter-spacing:.2px}
+  .auth-visual-brand small {color:rgba(246,242,233,.5);font-family:Arial,sans-serif;font-size:8px;letter-spacing:1.7px;direction:ltr}
+  .auth-visual-index {margin-right:auto;color:rgba(246,242,233,.45);font-family:Arial,sans-serif;font-size:10px;letter-spacing:1.5px;direction:ltr}
+  .auth-architecture {position:absolute;top:11%;left:-3%;z-index:0;width:94%;height:63%;overflow:visible;opacity:.95}
+  .auth-visual-copy {position:absolute;right:38px;bottom:36px;left:38px;z-index:2;direction:rtl}
+  .auth-visual-copy .auth-eyebrow {display:inline-flex;align-items:center;gap:8px;color:#d7ae72;font-size:11px;font-weight:700}
+  .auth-visual-copy .auth-eyebrow:before {content:'';width:6px;height:6px;border-radius:50%;background:#e1b675;box-shadow:0 0 12px rgba(225,182,117,.8)}
+  .auth-visual-copy h2 {margin:12px 0 8px;color:#f8f4eb;font-size:32px;font-weight:900;line-height:1.45;letter-spacing:-.6px}
+  .auth-visual-copy h2 strong {color:#e3b875;font-weight:900}
+  .auth-visual-copy p {max-width:390px;margin:0;color:rgba(246,242,233,.68);font-size:12px;line-height:2}
+  .auth-visual-rule {display:flex;align-items:center;gap:12px;margin-top:20px;color:rgba(246,242,233,.42);font-size:10px}
+  .auth-visual-rule:before {content:'';width:34px;height:1px;background:#a67b43}
+  @media(max-width:900px) {
+    #auth-screen {flex-direction:column!important;align-items:center!important;justify-content:flex-start!important;gap:12px!important;padding:14px 12px calc(20px + env(safe-area-inset-bottom))!important}
+    .auth-visual {order:1;flex:none;width:100%;max-width:520px;min-width:0;min-height:205px;height:205px}
+    .auth-box {order:2;flex:none;width:100%!important;max-width:520px!important;min-width:0;min-height:0;padding:26px 22px!important;border-radius:24px!important}
+    .auth-visual-top {top:15px;right:18px;left:18px}
+    .auth-visual-index {font-size:9px}
+    .auth-architecture {top:8%;left:-4%;width:55%;height:82%;opacity:.6}
+    .auth-visual-copy {right:20px;bottom:15px;left:20px}
+    .auth-visual-copy .auth-eyebrow {font-size:9px}
+    .auth-visual-copy h2 {margin:5px 0 3px;font-size:21px;line-height:1.35}
+    .auth-visual-copy p {max-width:78%;font-size:10px;line-height:1.55}
+    .auth-visual-rule {display:none}
+    .auth-logo {margin-bottom:19px}
+    .auth-intro {margin-bottom:17px}
+    .auth-form {gap:11px}
+  }
+  @media(max-width:380px) {
+    .auth-visual {height:190px;min-height:190px}
+    .auth-visual-copy h2 {font-size:19px}
+    .auth-visual-copy p {max-width:84%;font-size:9px}
+    .auth-box {padding:22px 17px!important}
+  }
+  @media(prefers-reduced-motion:reduce) {.auth-btn,.auth-input-shell {transition:none}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
@@ -989,6 +1082,12 @@
       <p>سامانه جامع مدیریت املاک</p>
     </div>
 
+    <div class="auth-intro">
+      <span class="auth-kicker">ورود امن به پنل</span>
+      <h2 id="auth-form-title">خوش آمدید</h2>
+      <p id="auth-form-subtitle">برای ادامه، وارد حساب کاربری خود شوید.</p>
+    </div>
+
     <!-- tabs -->
     <div class="auth-tabs" id="auth-tabs">
       <button class="auth-tab active" onclick="switchAuthTab('login')">ورود</button>
@@ -996,23 +1095,32 @@
     </div>
 
     <!-- login form -->
-    <div id="auth-login-form" class="auth-form">
-      <input type="email" id="login-username" placeholder="ایمیل" autocomplete="email" required>
-      <input type="password" id="login-password" placeholder="رمز عبور" autocomplete="current-password" required>
-      <div id="login-error" style="color:var(--red);font-size:12px;text-align:center;display:none;"></div>
-      <button class="auth-btn" onclick="doLogin()">ورود به سیستم</button>
-    </div>
+    <form id="auth-login-form" class="auth-form" onsubmit="event.preventDefault();doLogin();">
+      <label class="auth-field">
+        <span>ایمیل</span>
+        <span class="auth-input-shell" dir="ltr"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="m4.5 7 7.5 6 7.5-6"></path></svg><input type="email" id="login-username" placeholder="name@example.com" autocomplete="email" required></span>
+      </label>
+      <label class="auth-field">
+        <span>رمز عبور</span>
+        <span class="auth-input-shell" dir="ltr"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path><path d="M12 14v3"></path></svg><input type="password" id="login-password" placeholder="رمز عبور خود را وارد کنید" autocomplete="current-password" required></span>
+      </label>
+      <div class="auth-form-meta"><button class="auth-link" type="button" onclick="sendPasswordReset()">رمز عبور را فراموش کرده‌اید؟</button></div>
+      <div id="login-error" class="auth-error" role="alert" aria-live="polite"></div>
+      <button type="submit" class="btn-primary auth-btn">ورود به سامانه</button>
+    </form>
 
     <!-- register form -->
-    <div id="auth-register-form" class="auth-form" style="display:none;">
-      <input type="text" id="reg-fullname" placeholder="نام و نام خانوادگی" autocomplete="name" required>
-      <input type="email" id="reg-username" placeholder="ایمیل شما" autocomplete="email" required>
-      <input type="tel" id="reg-phone" placeholder="شماره موبایل" autocomplete="tel" inputmode="tel">
-      <input type="password" id="reg-password" placeholder="رمز عبور" autocomplete="new-password" minlength="6" required>
-      <input type="password" id="reg-password2" placeholder="تکرار رمز عبور" autocomplete="new-password" minlength="6" required>
-      <div id="reg-error" style="color:var(--red);font-size:12px;text-align:center;display:none;"></div>
-      <button class="auth-btn" onclick="doRegister()">ارسال درخواست ثبت‌نام</button>
-    </div>
+    <form id="auth-register-form" class="auth-form" style="display:none;" onsubmit="event.preventDefault();doRegister();">
+      <label class="auth-field"><span>نام و نام خانوادگی</span><span class="auth-input-shell"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"></circle><path d="M3 20c.5-3.4 2.5-5.2 6-5.2 1.8 0 3.2.5 4.2 1.4"></path><path d="M17 14v7M13.5 17.5h7"></path></svg><input type="text" id="reg-fullname" placeholder="نام شما" autocomplete="name" required></span></label>
+      <label class="auth-field"><span>ایمیل</span><span class="auth-input-shell" dir="ltr"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="m4.5 7 7.5 6 7.5-6"></path></svg><input type="email" id="reg-username" placeholder="name@example.com" autocomplete="email" required></span></label>
+      <label class="auth-field"><span>شماره موبایل <small>(اختیاری)</small></span><span class="auth-input-shell" dir="ltr"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"></rect><path d="M10 18.5h4"></path></svg><input type="tel" id="reg-phone" placeholder="09xxxxxxxxx" autocomplete="tel" inputmode="tel"></span></label>
+      <label class="auth-field"><span>رمز عبور (حداقل ۶ کاراکتر)</span><span class="auth-input-shell" dir="ltr"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg><input type="password" id="reg-password" placeholder="رمز عبور" autocomplete="new-password" minlength="6" required></span></label>
+      <label class="auth-field"><span>تکرار رمز عبور</span><span class="auth-input-shell" dir="ltr"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg><input type="password" id="reg-password2" placeholder="رمز عبور را دوباره وارد کنید" autocomplete="new-password" minlength="6" required></span></label>
+      <div id="reg-error" class="auth-error" role="alert" aria-live="polite"></div>
+      <button type="submit" class="btn-primary auth-btn">ارسال درخواست ثبت‌نام</button>
+    </form>
+
+    <div class="auth-secure-note"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg><span>حساب مشاوران پس از تأیید مدیر فعال می‌شود.</span></div>
 
     <!-- pending state -->
     <div id="auth-pending-box" class="auth-pending" style="display:none;">
@@ -1022,6 +1130,35 @@
       <button class="auth-btn" style="margin-top:16px;" onclick="switchAuthTab('login')">بازگشت به ورود</button>
     </div>
   </div>
+  <aside class="auth-visual" aria-label="معماری و پنل تخصصی املاک شاخص">
+    <div class="auth-visual-top">
+      <span class="auth-visual-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5h16M6.5 19.5V10l5.5-4 5.5 4v9.5"></path><path d="M9.5 19.5v-5h5v5M3.5 10.5l8.5-6 8.5 6"></path><circle cx="12" cy="3.5" r="1"></circle></svg></span>
+      <span class="auth-visual-brand"><strong>املاک شاخص</strong><small>REAL ESTATE CRM</small></span>
+      <span class="auth-visual-index">SH / 01</span>
+    </div>
+    <svg class="auth-architecture" viewBox="0 0 600 440" fill="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="auth-home-fill" x1="300" y1="170" x2="300" y2="390" gradientUnits="userSpaceOnUse"><stop stop-color="#d7aa68" stop-opacity=".24"></stop><stop offset="1" stop-color="#d7aa68" stop-opacity=".025"></stop></linearGradient>
+        <linearGradient id="auth-window-glow" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e6bd7e" stop-opacity=".75"></stop><stop offset="1" stop-color="#e6bd7e" stop-opacity=".12"></stop></linearGradient>
+      </defs>
+      <g stroke="#d9b578" stroke-opacity=".24" stroke-width="1"><path d="M44 370c92-42 154-42 254 0s166 42 258 0"></path><path d="M24 389c112-50 180-50 274 0s172 50 278 0"></path><path d="M81 407c85-35 142-35 217 0s149 35 221 0"></path><path d="M92 350h400M126 330h347M157 310h286"></path><path d="M112 350v58M166 350v44M220 350v32M274 350v25M328 350v25M382 350v32M436 350v44M490 350v58"></path></g>
+      <g fill="#141a17" stroke="#b18a52" stroke-opacity=".6" stroke-width="1.2"><path d="M67 350v-70h54v70z" opacity=".72"></path><path d="M479 350v-92h50v92z" opacity=".65"></path><path d="M514 350v-62h35v62z" opacity=".5"></path></g>
+      <path d="M145 271 300 176l155 95v108H145V271Z" fill="url(#auth-home-fill)" stroke="#dcb574" stroke-opacity=".88" stroke-width="1.6"></path>
+      <path d="m123 273 177-112 177 112M145 271l155-95 155 95" stroke="#e0b978" stroke-opacity=".84" stroke-width="1.8"></path>
+      <path d="M171 285h59v55h-59zM370 285h59v55h-59z" fill="url(#auth-window-glow)" fill-opacity=".58" stroke="#d8b273" stroke-opacity=".7"></path>
+      <path d="M271 310h58v69h-58z" fill="#141a17" stroke="#d8b273" stroke-opacity=".8"></path>
+      <path d="M300 310v69M271 345h58" stroke="#d8b273" stroke-opacity=".5"></path>
+      <path d="M300 175V105" stroke="#e6bd7e" stroke-opacity=".65" stroke-dasharray="4 5"></path>
+      <circle cx="300" cy="93" r="25" stroke="#e6bd7e" stroke-opacity=".6"></circle><circle cx="300" cy="93" r="8" fill="#e6bd7e" fill-opacity=".78"></circle>
+      <path d="M300 69c-13 0-24 10-24 24 0 17 24 39 24 39s24-22 24-39c0-14-11-24-24-24Z" stroke="#e6bd7e" stroke-opacity=".58"></path>
+    </svg>
+    <div class="auth-visual-copy">
+      <span class="auth-eyebrow">پنل اختصاصی مشاوران املاک</span>
+      <h2>از شناخت مشتری،<br><strong>تا امضای معامله.</strong></h2>
+      <p>پرونده‌ها، پیگیری‌ها و فرصت‌های ملکی؛ دقیق و یکپارچه در یک نگاه.</p>
+      <div class="auth-visual-rule">مدیریت املاک، با نگاه شاخص</div>
+    </div>
+  </aside>
 </div>
 
 <!-- Sidebar -->
@@ -2224,7 +2361,7 @@ async function doLogin(){
   } catch(e) {
     showLoginError(e.message||'ورود انجام نشد. ایمیل و رمز را بررسی کنید.');
   } finally {
-    if(btn){btn.disabled=false;btn.textContent='ورود';}
+    if(btn){btn.disabled=false;btn.textContent='ورود به سامانه';}
   }
 }
 
@@ -2283,6 +2420,10 @@ async function sendPasswordReset(){
 }
 
 function switchAuthTab(tab){
+  const title = document.getElementById('auth-form-title');
+  const subtitle = document.getElementById('auth-form-subtitle');
+  if(title) title.textContent = tab==='login' ? 'خوش آمدید' : 'به شاخص بپیوندید';
+  if(subtitle) subtitle.textContent = tab==='login' ? 'برای ادامه، وارد حساب کاربری خود شوید.' : 'درخواست همکاری خود را برای بررسی مدیر ارسال کنید.';
   document.getElementById('auth-login-form').style.display   = tab==='login'    ? 'flex' : 'none';
   document.getElementById('auth-register-form').style.display= tab==='register' ? 'flex' : 'none';
   document.getElementById('auth-pending-box').style.display  = 'none';
