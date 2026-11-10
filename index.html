@@ -32,14 +32,14 @@
   }
   function snapshot(id,value){ return {id,exists:value!==undefined&&value!==null,data:()=>value?{...value}:undefined}; }
   function parsePath(path){ return String(path).split('/').filter(Boolean); }
-  function profileRef(id){
-    return {
-      kind:'profile',id,
-      get:async()=>{
-        const row=unwrap(await _supabase.from('profiles').select('id,email,fullname,username,phone,role,status,join_date').eq('id',id).maybeSingle());
-        return snapshot(id,profileData(row));
-      },
-      set:async()=>{ throw new Error('پروفایل فقط از مسیر ثبت‌نام و تنظیمات امن تغییر می‌کند.'); },
+function profileRef(id){
+  return {
+    kind:'profile',id,
+    get:async()=>{
+      const row=unwrap(await _supabase.from('profiles').select('id,email,fullname,username,phone,role,status,join_date,is_primary_admin').eq('id',id).maybeSingle());
+      return snapshot(id,profileData(row));
+    },
+    set:async()=>{ throw new Error('پروفایل فقط از مسیر ثبت‌نام و تنظیمات امن تغییر می‌کند.'); },
       update:async patch=>{
         if(Object.prototype.hasOwnProperty.call(patch,'role')) throw new Error('تغییر نقش فقط از مسیر امن مدیریت انجام می‌شود.');
         if(Object.prototype.hasOwnProperty.call(patch,'status')){
@@ -92,7 +92,7 @@
     collection(path){
       const p=parsePath(path);
       if(p.length===1&&p[0]==='users') return {kind:'profiles',doc:id=>profileRef(id),get:async()=>{
-        const rows=await fetchAll(_supabase.from('profiles').select('id,email,fullname,username,phone,role,status,join_date').order('join_date',{ascending:false}));
+        const rows=await fetchAll(_supabase.from('profiles').select('id,email,fullname,username,phone,role,status,join_date,is_primary_admin').order('join_date',{ascending:false}));
         return {docs:rows.map(row=>({id:row.id,data:()=>profileData(row)}))};
       }};
       if(p.length===3&&p[0]==='users') return {kind:'records',ownerId:p[1],collectionName:p[2],doc:id=>recordRef(p[1],p[2],id),get:async()=>{
@@ -976,6 +976,7 @@
   .auth-input-shell:focus-within {border-color:#bb8a4b;box-shadow:0 0 0 3px rgba(187,138,75,.13)}
   .auth-input-shell svg {flex:0 0 18px;width:18px;height:18px;color:#999d96;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
   .auth-input-shell input {width:100%!important;min-width:0;min-height:50px!important;padding:10px 0!important;border:0!important;border-radius:0!important;outline:0!important;background:transparent!important;box-shadow:none!important;color:#252a26!important;font-family:'Vazirmatn',sans-serif;font-size:16px!important;text-align:left}
+  .auth-input-shell select {width:100%;min-width:0;min-height:50px;padding:10px 0;border:0;outline:0;background:transparent;color:#252a26;font-family:'Vazirmatn',sans-serif;font-size:14px;text-align:right;direction:rtl}
   .auth-input-shell input::placeholder {color:#a5a8a1;opacity:1}
   .auth-form-meta {display:flex;justify-content:flex-start;margin:-3px 0 1px}
   .auth-link {padding:2px 0;border:0;background:none;color:#9a6d31;font-family:'Vazirmatn',sans-serif;font-size:11px;font-weight:800;cursor:pointer}
@@ -1067,6 +1068,14 @@
     <span class="mob-icon">📞</span>
     <span class="mob-label">پیگیری</span>
   </button>
+  <button class="mob-nav-item" onclick="showPage('customer-marketplace')" data-section="customer-marketplace" aria-label="فایل‌های موجود" style="display:none;">
+    <span class="mob-icon">🏘️</span>
+    <span class="mob-label">فایل‌ها</span>
+  </button>
+  <button class="mob-nav-item" onclick="showPage('customer-requests')" data-section="customer-requests" aria-label="درخواست مشاور" style="display:none;">
+    <span class="mob-icon">📨</span>
+    <span class="mob-label">مشاور</span>
+  </button>
   <button class="mob-nav-item" onclick="toggleMobileMenu()" id="mob-more-btn" aria-label="بیشتر" aria-expanded="false">
     <span class="mob-icon">⋯</span>
     <span class="mob-label">بیشتر</span>
@@ -1113,14 +1122,15 @@
     <form id="auth-register-form" class="auth-form" style="display:none;" onsubmit="event.preventDefault();doRegister();">
       <label class="auth-field"><span>نام و نام خانوادگی</span><span class="auth-input-shell"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"></circle><path d="M3 20c.5-3.4 2.5-5.2 6-5.2 1.8 0 3.2.5 4.2 1.4"></path><path d="M17 14v7M13.5 17.5h7"></path></svg><input type="text" id="reg-fullname" placeholder="نام شما" autocomplete="name" required></span></label>
       <label class="auth-field"><span>ایمیل</span><span class="auth-input-shell" dir="ltr"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="m4.5 7 7.5 6 7.5-6"></path></svg><input type="email" id="reg-username" placeholder="name@example.com" autocomplete="email" required></span></label>
-      <label class="auth-field"><span>شماره موبایل <small>(اختیاری)</small></span><span class="auth-input-shell" dir="ltr"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"></rect><path d="M10 18.5h4"></path></svg><input type="tel" id="reg-phone" placeholder="09xxxxxxxxx" autocomplete="tel" inputmode="tel"></span></label>
+      <label class="auth-field"><span>نقش در سامانه</span><span class="auth-input-shell"><select id="reg-role" onchange="updateRegistrationFields()" required><option value="customer">مشتری</option><option value="advisor">مشاور</option></select></span></label>
+      <label class="auth-field" id="reg-phone-field"><span id="reg-phone-label">شماره موبایل</span><span class="auth-input-shell" dir="ltr"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"></rect><path d="M10 18.5h4"></path></svg><input type="tel" id="reg-phone" placeholder="09xxxxxxxxx" autocomplete="tel" inputmode="tel"></span></label>
       <label class="auth-field"><span>رمز عبور (حداقل ۶ کاراکتر)</span><span class="auth-input-shell" dir="ltr"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg><input type="password" id="reg-password" placeholder="رمز عبور" autocomplete="new-password" minlength="6" required></span></label>
       <label class="auth-field"><span>تکرار رمز عبور</span><span class="auth-input-shell" dir="ltr"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg><input type="password" id="reg-password2" placeholder="رمز عبور را دوباره وارد کنید" autocomplete="new-password" minlength="6" required></span></label>
       <div id="reg-error" class="auth-error" role="alert" aria-live="polite"></div>
       <button type="submit" class="btn-primary auth-btn">ارسال درخواست ثبت‌نام</button>
     </form>
 
-    <div class="auth-secure-note"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg><span>حساب مشاوران پس از تأیید مدیر فعال می‌شود.</span></div>
+    <div class="auth-secure-note"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg><span>حساب مشتریان و مشاوران پس از تأیید مدیر فعال می‌شود.</span></div>
 
     <!-- pending state -->
     <div id="auth-pending-box" class="auth-pending" style="display:none;">
@@ -1193,6 +1203,15 @@
       </button>
       <button class="nav-item" onclick="showPage('deals')">
         <span class="icon">📋</span> معاملات
+      </button>
+      <button class="nav-item" data-role-page="customer-marketplace" onclick="showPage('customer-marketplace')" style="display:none;">
+        <span class="icon">🏘️</span> فایل‌های موجود
+      </button>
+      <button class="nav-item" data-role-page="customer-requests" onclick="showPage('customer-requests')" style="display:none;">
+        <span class="icon">📨</span> درخواست مشاور
+      </button>
+      <button class="nav-item" data-role-page="advisor-requests" onclick="showPage('advisor-requests')" style="display:none;">
+        <span class="icon">📨</span> درخواست‌های مشاور
       </button>
     </div>
     <div class="nav-section" id="admin-nav-section" data-admin-only="true" style="display:none;">
@@ -1409,6 +1428,7 @@
           <span>🔍</span>
           <input type="text" placeholder="جستجو مشتری..." id="client-search" oninput="renderClients()">
         </div>
+        <button class="btn btn-ghost" onclick="copyCustomerSignupLink()">🔗 کپی لینک ثبت‌نام مشتری</button>
         <button class="btn btn-primary" onclick="openNewClientModal()">➕ مشتری جدید</button>
       </div>
       <div class="card">
@@ -1416,6 +1436,31 @@
           <div class="empty-state"><div class="icon">👥</div><p>هنوز مشتری‌ای ثبت نشده</p></div>
         </div>
       </div>
+    </div>
+
+    <!-- Customer portal: safe marketplace and customer-owned submissions -->
+    <div class="page" id="page-customer-marketplace">
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-header"><div><div class="card-title">🏘️ فایل‌های موجود در مجموعه</div><div style="font-size:12px;color:var(--text2);margin-top:4px;">اطلاعات تماس مالک و نشانی دقیق نمایش داده نمی‌شود؛ برای ارتباط درخواست مشاور بفرستید.</div></div><button class="btn btn-primary" onclick="openNewPropertyModal()">➕ ثبت فایل ملک</button></div>
+        <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;"><input id="market-search" type="search" placeholder="جستجو در فایل‌های منتشرشده..." oninput="renderCustomerMarketplace()" style="flex:1;min-width:220px;"><select id="market-type" onchange="renderCustomerMarketplace()" style="min-width:150px;"><option value="">همه نوع‌ها</option><option>آپارتمان</option><option>ویلا</option><option>زمین</option><option>تجاری</option><option>مشارکت در ساخت</option><option>سایر</option></select></div>
+      </div>
+      <div id="marketplace-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-bottom:20px;"><div class="empty-state"><div class="icon">🏠</div><p>در حال بارگذاری فایل‌ها...</p></div></div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">📁 فایل‌هایی که خودتان ثبت کرده‌اید</div></div>
+        <div class="card-body" id="customer-submissions-list"><div class="empty-state"><div class="icon">📄</div><p>هنوز فایلی ثبت نکرده‌اید</p></div></div>
+      </div>
+    </div>
+
+    <div class="page" id="page-customer-requests">
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-header"><div><div class="card-title">📨 درخواست ارتباط با مشاور</div><div style="font-size:12px;color:var(--text2);margin-top:4px;">مدیر مجموعه درخواست را بررسی و به یک مشاور فعال واگذار می‌کند. شماره شما فقط برای مدیر و مشاورِ واگذارشده قابل مشاهده است.</div></div></div>
+        <div class="card-body"><input type="hidden" id="customer-request-owner-id"><input type="hidden" id="customer-request-property-id"><div class="form-group"><label>پیام شما (اختیاری)</label><textarea id="customer-request-message" maxlength="2000" placeholder="مثلاً برای بازدید یا اطلاعات بیشتر با من تماس بگیرید"></textarea></div><button class="btn btn-primary" onclick="requestAdvisorFromPortal()">ارسال درخواست به مدیر</button></div>
+      </div>
+      <div class="card"><div class="card-header"><div class="card-title">پیگیری درخواست‌های من</div></div><div class="card-body" id="customer-requests-list"><div class="empty-state"><div class="icon">📨</div><p>درخواستی ثبت نشده است</p></div></div></div>
+    </div>
+
+    <div class="page" id="page-advisor-requests">
+      <div class="card"><div class="card-header"><div class="card-title">📨 درخواست‌های ارتباط مشتریان</div></div><div class="card-body" id="advisor-requests-list"><div class="empty-state"><div class="icon">📨</div><p>درخواستی ثبت نشده است</p></div></div></div>
     </div>
 
     <!-- Advisors -->
@@ -1705,7 +1750,7 @@
       <!-- All users -->
       <div class="card">
         <div class="card-header">
-          <div class="card-title">👥 همه مشاوران</div>
+          <div class="card-title">👥 کاربران و نقش‌ها</div>
         </div>
         <div class="card-body" id="admin-users-list"></div>
       </div>
@@ -2330,23 +2375,32 @@ function showAuthScreen(){
   document.querySelector('.main').style.display = 'none';
 }
 
-async function showApp(){
-  document.getElementById('auth-screen').style.display = 'none';
-  document.querySelector('.sidebar').style.display = 'flex';
-  document.querySelector('.main').style.display = 'flex';
+async function showApp(loadSequence=authLoadSequence){
+  showAuthScreen();
+  clearPrivateSessionState();
   document.getElementById('sb-avatar').textContent = currentUser.fullname?.[0] || '؟';
   document.getElementById('sb-name').textContent = currentUser.fullname;
-  document.getElementById('sb-role').textContent = currentUser.role === 'admin' ? '👑 مدیر سیستم' : '🤝 مشاور';
+  document.getElementById('sb-role').textContent = currentUser.is_primary_admin ? '👑 مدیر اصلی' : ({admin:'👑 مدیر',advisor:'🤝 مشاور',customer:'🏠 مشتری'}[currentUser.role] || 'کاربر');
   applyRoleAccess();
-  if(isAdmin()) updatePendingBadge();
   // show loading indicator while the shared database loads
   document.getElementById('prop-count').textContent = '...';
   document.getElementById('client-count').textContent = '...';
   await loadUserState();
-  await loadChatContacts();
-  renderProperties(); renderClients(); renderAdvisors(); renderDeals(); renderTgPosts(); updateCounts(); renderDashboard();
-  updateFollowupBadge();
-  updateClientReminderBadge();
+  if(loadSequence !== authLoadSequence || !currentUser){ clearPrivateSessionState(); return; }
+  if(currentUser.role !== 'customer'){
+    await loadChatContacts();
+    if(loadSequence !== authLoadSequence || !currentUser){ clearPrivateSessionState(); return; }
+    renderProperties(); renderClients(); renderAdvisors(); renderDeals(); renderTgPosts(); updateCounts(); renderDashboard();
+    updateFollowupBadge(); updateClientReminderBadge();
+    showPage('dashboard');
+  } else {
+    state.clients=[]; state.deals=[]; state.advisors=[]; state.followups=[]; state.reminders=[]; state.priceHistory=[]; state.clientActivities=[]; state.tgPosts=[]; state.accounting=[];
+    showPage('customer-marketplace');
+  }
+  document.getElementById('auth-screen').style.display = 'none';
+  document.querySelector('.sidebar').style.display = 'flex';
+  document.querySelector('.main').style.display = 'flex';
+  if(isAdmin()) updatePendingBadge();
 }
 
 async function doLogin(){
@@ -2374,11 +2428,12 @@ async function doRegister(){
   const fullname = document.getElementById('reg-fullname').value.trim();
   const email    = document.getElementById('reg-username').value.trim().toLowerCase();
   const phone    = document.getElementById('reg-phone').value.trim();
+  const requestedRole = document.getElementById('reg-role')?.value === 'advisor' ? 'advisor' : 'customer';
   const pass     = document.getElementById('reg-password').value;
   const pass2    = document.getElementById('reg-password2').value;
   document.getElementById('reg-error').style.display = 'none';
 
-  if(!fullname || !email || !pass){ showRegError('همه فیلدها الزامی هستند'); return; }
+  if(!fullname || !email || !pass || (requestedRole === 'customer' && !phone)){ showRegError(requestedRole === 'customer' && !phone ? 'برای ثبت‌نام مشتری شماره موبایل الزامی است' : 'همه فیلدها الزامی هستند'); return; }
   if(pass !== pass2){ showRegError('رمز عبور و تکرار آن یکسان نیستند'); return; }
   if(pass.length < 6){ showRegError('رمز عبور حداقل ۶ کاراکتر باشد'); return; }
 
@@ -2386,7 +2441,7 @@ async function doRegister(){
   if(btn){ btn.disabled = true; btn.textContent = '...'; }
   try {
     await backend().createUserWithEmailAndPassword(backend().auth, email, pass, {
-      fullname, username:email.split('@')[0], phone
+      fullname, username:email.split('@')[0], phone, requested_role:requestedRole
     });
     document.getElementById('auth-login-form').style.display   = 'none';
     document.getElementById('auth-register-form').style.display= 'none';
@@ -2402,6 +2457,14 @@ async function doRegister(){
 function showRegError(msg){
   const el = document.getElementById('reg-error');
   el.textContent = msg; el.style.display = 'block';
+}
+
+function updateRegistrationFields(){
+  const role = document.getElementById('reg-role')?.value || 'customer';
+  const phone = document.getElementById('reg-phone');
+  const label = document.getElementById('reg-phone-label');
+  if(phone) phone.required = role === 'customer';
+  if(label) label.innerHTML = role === 'customer' ? 'شماره موبایل <small>(برای تماس مشاور ضروری)</small>' : 'شماره موبایل <small>(اختیاری)</small>';
 }
 
 async function sendPasswordReset(){
@@ -2432,7 +2495,17 @@ function switchAuthTab(tab){
   document.querySelectorAll('.auth-tab')[tab==='login'?0:1].classList.add('active');
   document.getElementById('login-error').style.display = 'none';
   document.getElementById('reg-error').style.display = 'none';
+  if(tab === 'register') updateRegistrationFields();
 }
+
+window.addEventListener('DOMContentLoaded', function(){
+  if(new URLSearchParams(window.location.search).get('signup') === 'customer'){
+    switchAuthTab('register');
+    const role = document.getElementById('reg-role');
+    if(role) role.value = 'customer';
+    updateRegistrationFields();
+  }
+});
 
 async function doLogout(){
   document.getElementById('user-menu').style.display = 'none';
@@ -2493,6 +2566,18 @@ async function refreshSignedDealAttachments(deals){
 
 async function loadUserState(){
   const uid = currentUser.id;
+  if(currentUser.role === 'customer'){
+    const [marketResult, ownResult] = await Promise.all([
+      _supabase.from('marketplace_listings').select('owner_id,record_id,listing_data,published_at,advisor_name,advisor_phone').order('published_at',{ascending:false}).limit(200),
+      _supabase.rpc('get_my_property_submissions')
+    ]);
+    if(marketResult.error) throw marketResult.error;
+    if(ownResult.error) throw ownResult.error;
+    state.marketplace = await refreshSignedPropertyImages((marketResult.data||[]).map(row=>({...row.listing_data,id:row.record_id,_uid:row.owner_id,advisorName:row.advisor_name||'',advisorPhone:row.advisor_phone||'',publishedAt:row.published_at})));
+    state.properties = await refreshSignedPropertyImages((ownResult.data||[]).map(row=>({...row.payload,id:row.record_id,_uid:row.owner_id})));
+    state.customerRequests=[];
+    return;
+  }
   const colPath = currentUser.role === 'admin'
     ? null   // admin loads all; handled per collection
     : `users/${uid}`;
@@ -2511,7 +2596,7 @@ async function loadUserState(){
     for(const uDoc of usersSnap.docs){
       const uid2 = uDoc.id;
       const profile = { ...uDoc.data(), id: uid2 };
-      if(profile.role !== 'admin') advisors.push(profile);
+      if(profile.role === 'advisor') advisors.push(profile);
       const load = async (col) => {
         const s = await backend().getDocs(backend().collection(backend().db, `users/${uid2}/${col}`));
         return s.docs.map(d => ({ ...d.data(), id: d.id, _uid: uid2 }));
@@ -2651,80 +2736,50 @@ async function updatePendingBadge(){
 
 async function renderAdminPage(){
   if(!isAdmin()) return showPage('dashboard');
-  const usersSnap = await backend().getDocs(backend().collection(backend().db, 'users'));
-  const users = usersSnap.docs.map(d => ({ ...d.data(), id: d.id }));
-  const advisors = users.filter(u => u.role === 'advisor');
-  const pending  = advisors.filter(u => u.status === 'pending');
-  const active   = advisors.filter(u => u.status === 'active');
+  try {
+    const usersSnap = await backend().getDocs(backend().collection(backend().db, 'users'));
+    const users = usersSnap.docs.map(d => ({ ...d.data(), id: d.id }));
+    state.allUsers = users;
+    const advisors = users.filter(u => u.role === 'advisor');
+    const customers = users.filter(u => u.role === 'customer');
+    const pending = users.filter(u => u.status === 'pending');
+    const activeAdvisors = advisors.filter(u => u.status === 'active');
+    const totalProps = state.properties.length;
+    const totalClients = state.clients.length;
+    const totalDeals = state.deals.length;
+    document.getElementById('admin-stats-grid').innerHTML = `
+      <div class="admin-stat"><div class="admin-stat-val" style="color:var(--accent)">${advisors.length}</div><div class="admin-stat-lbl">مشاور</div></div>
+      <div class="admin-stat"><div class="admin-stat-val" style="color:var(--green)">${activeAdvisors.length}</div><div class="admin-stat-lbl">مشاور فعال</div></div>
+      <div class="admin-stat"><div class="admin-stat-val" style="color:var(--blue)">${customers.length}</div><div class="admin-stat-lbl">مشتری حساب‌دار</div></div>
+      <div class="admin-stat"><div class="admin-stat-val" style="color:var(--red)">${pending.length}</div><div class="admin-stat-lbl">در انتظار تأیید</div></div>
+      <div class="admin-stat"><div class="admin-stat-val" style="color:var(--blue)">${totalProps}</div><div class="admin-stat-lbl">کل ملک‌ها</div></div>
+      <div class="admin-stat"><div class="admin-stat-val" style="color:var(--purple)">${totalClients}</div><div class="admin-stat-lbl">مشتریان CRM</div></div>
+      <div class="admin-stat"><div class="admin-stat-val" style="color:var(--green)">${totalDeals}</div><div class="admin-stat-lbl">کل معاملات</div></div>`;
 
-  // stats from already-loaded state
-  const totalProps   = state.properties.length;
-  const totalClients = state.clients.length;
-  const totalDeals   = state.deals.length;
-  const totalComm    = state.deals.reduce((s,d) => s+(parseFloat(d.commission)||0), 0);
+    const roleLabel = {admin:'مدیر',advisor:'مشاور',customer:'مشتری'};
+    const statusLabel = {active:'<span class="badge badge-green">فعال</span>',pending:'<span class="badge badge-gold">در انتظار</span>',disabled:'<span class="badge badge-gray">غیرفعال</span>'};
+    const pendingEl = document.getElementById('admin-pending-list');
+    pendingEl.innerHTML = pending.length ? pending.map(u=>`<div class="admin-user-card">
+      <div class="admin-user-avatar" style="background:var(--accent);">${escapeHTML((u.fullname||'?')[0])}</div>
+      <div style="flex:1;min-width:150px;"><div style="font-size:14px;font-weight:700;">${escapeHTML(u.fullname||'بدون نام')}</div>
+      <div style="font-size:12px;color:var(--text2);">${escapeHTML(u.email||'')} · ${escapeHTML(u.phone||'بدون شماره')} · درخواست نقش: ${escapeHTML(roleLabel[u.role]||u.role)}</div></div>
+      <button class="btn btn-primary btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="approveUser(this.dataset.userId)">✅ تأیید</button>
+      <button class="btn btn-danger btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="rejectUser(this.dataset.userId)">❌ رد</button>
+    </div>`).join('') : '<div class="empty-state"><div class="icon">✅</div><p>درخواست جدیدی وجود ندارد</p></div>';
 
-  document.getElementById('admin-stats-grid').innerHTML = `
-    <div class="admin-stat"><div class="admin-stat-val" style="color:var(--accent)">${advisors.length}</div><div class="admin-stat-lbl">کل مشاوران</div></div>
-    <div class="admin-stat"><div class="admin-stat-val" style="color:var(--green)">${active.length}</div><div class="admin-stat-lbl">مشاور فعال</div></div>
-    <div class="admin-stat"><div class="admin-stat-val" style="color:var(--red)">${pending.length}</div><div class="admin-stat-lbl">در انتظار تأیید</div></div>
-    <div class="admin-stat"><div class="admin-stat-val" style="color:var(--blue)">${totalProps}</div><div class="admin-stat-lbl">کل ملک‌ها</div></div>
-    <div class="admin-stat"><div class="admin-stat-val" style="color:var(--purple)">${totalClients}</div><div class="admin-stat-lbl">کل مشتریان</div></div>
-    <div class="admin-stat"><div class="admin-stat-val" style="color:var(--green)">${totalDeals}</div><div class="admin-stat-lbl">کل معاملات</div></div>
-  `;
-
-  // pending list
-  const pendingEl = document.getElementById('admin-pending-list');
-  if(!pending.length){
-    pendingEl.innerHTML = '<div class="empty-state"><div class="icon">✅</div><p>درخواست جدیدی وجود ندارد</p></div>';
-  } else {
-    pendingEl.innerHTML = pending.map(u => `
-      <div class="admin-user-card">
-        <div class="admin-user-avatar" style="background:var(--accent);">${u.fullname[0]}</div>
-        <div style="flex:1;">
-          <div style="font-size:14px;font-weight:700;">${u.fullname}</div>
-          <div style="font-size:12px;color:var(--text2);">@${u.username} · ${u.phone||'بدون شماره'} · ${u.joinDate}</div>
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="approveUser('${u.id}')">✅ تأیید</button>
-        <button class="btn btn-danger btn-sm" onclick="rejectUser('${u.id}')">❌ رد</button>
-      </div>
-    `).join('');
-  }
-
-  // all advisors list
-  const allEl = document.getElementById('admin-users-list');
-  if(!advisors.length){
-    allEl.innerHTML = '<div class="empty-state" style="padding:30px;"><div class="icon">🤝</div><p>هنوز مشاوری ثبت‌نام نکرده</p></div>';
-  } else {
-    const statusLabel = {active:'<span class="badge badge-green">فعال</span>', pending:'<span class="badge badge-gold">در انتظار</span>', disabled:'<span class="badge badge-gray">غیرفعال</span>'};
-    allEl.innerHTML = `<table><thead><tr>
-      <th>نام</th><th>نام کاربری</th><th>موبایل</th><th>تاریخ عضویت</th>
-      <th>ملک</th><th>مشتری</th><th>معامله</th><th>وضعیت</th><th>عملیات</th>
-    </tr></thead><tbody>
-    ${advisors.map(u => {
-      const uProps   = state.properties.filter(p=>p._uid===u.id||p.userId===u.id).length;
-      const uClients = state.clients.filter(c=>c._uid===u.id||c.userId===u.id).length;
-      const uDeals   = state.deals.filter(d=>d._uid===u.id||d.userId===u.id).length;
-      return `<tr>
-        <td><b>${u.fullname}</b></td>
-        <td style="color:var(--text2);">@${u.username}</td>
-        <td>${u.phone||'—'}</td>
-        <td style="color:var(--text3)">${u.joinDate}</td>
-        <td style="color:var(--blue)">${uProps}</td>
-        <td style="color:var(--purple)">${uClients}</td>
-        <td style="color:var(--green)">${uDeals}</td>
-        <td>${statusLabel[u.status]||u.status}</td>
-        <td style="display:flex;gap:6px;">
-          ${u.status==='active'
-            ? `<button class="btn btn-danger btn-sm" onclick="disableUser('${u.id}')">🚫 غیرفعال</button>`
-            : u.status==='disabled'
-              ? `<button class="btn btn-primary btn-sm" onclick="approveUser('${u.id}')">✅ فعال</button>`
-              : `<button class="btn btn-primary btn-sm" onclick="approveUser('${u.id}')">✅ تأیید</button>`
-          }
-          <button class="btn btn-ghost btn-sm" onclick="resetUserPass('${u.id}')">🔑</button>
-        </td>
-      </tr>`;
-    }).join('')}
-    </tbody></table>`;
+    const allEl=document.getElementById('admin-users-list');
+    allEl.innerHTML=users.length?`<div style="overflow-x:auto;"><table><thead><tr><th>نام</th><th>ایمیل</th><th>موبایل</th><th>نقش</th><th>تاریخ عضویت</th><th>ملک</th><th>مشتری</th><th>معامله</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>
+      ${users.map(u=>{
+        const uProps=state.properties.filter(p=>p._uid===u.id||p.userId===u.id).length;
+        const uClients=state.clients.filter(c=>c._uid===u.id||c.userId===u.id).length;
+        const uDeals=state.deals.filter(d=>d._uid===u.id||d.userId===u.id).length;
+        const roleControl=u.is_primary_admin?'<span class="badge badge-gold">👑 مدیر اصلی · قفل</span>':`<select data-user-id="${escapeHTML(u.id)}" aria-label="نقش ${escapeHTML(u.fullname||'کاربر')}" onchange="changeUserRole(this.dataset.userId,this.value)"><option value="admin" ${u.role==='admin'?'selected':''}>مدیر</option><option value="advisor" ${u.role==='advisor'?'selected':''}>مشاور</option><option value="customer" ${u.role==='customer'?'selected':''}>مشتری</option></select>`;
+        const actions=u.is_primary_admin?'<span style="color:var(--text3);font-size:11px;">حساب محافظت‌شده</span>':(u.status==='active'?`<button class="btn btn-danger btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="disableUser(this.dataset.userId)">🚫 غیرفعال</button>`:`<button class="btn btn-primary btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="approveUser(this.dataset.userId)">${u.status==='disabled'?'✅ فعال':'✅ تأیید'}</button>`);
+        return `<tr><td><b>${escapeHTML(u.fullname||'بدون نام')}</b></td><td>${escapeHTML(u.email||'—')}</td><td>${escapeHTML(u.phone||'—')}</td><td>${roleControl}</td><td>${escapeHTML(u.joinDate||'—')}</td><td>${uProps}</td><td>${uClients}</td><td>${uDeals}</td><td>${statusLabel[u.status]||escapeHTML(u.status||'—')}</td><td style="display:flex;gap:6px;align-items:center;">${actions}${u.is_primary_admin?'':`<button class="btn btn-ghost btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="resetUserPass(this.dataset.userId)" title="بازنشانی رمز">🔑</button>`}</td></tr>`;
+      }).join('')}</tbody></table></div>`:'<div class="empty-state"><div class="icon">👥</div><p>کاربری ثبت‌نام نکرده است</p></div>';
+  } catch(error) {
+    console.error('Could not render admin users:',error);
+    document.getElementById('admin-users-list').innerHTML=`<div class="empty-state"><p>بارگذاری کاربران انجام نشد: ${escapeHTML(error.message)}</p></div>`;
   }
 }
 
@@ -2819,8 +2874,12 @@ async function saveProfile(){
 // State
 let state = {
   properties: [],
+  marketplace: [],
   clients: [],
   advisors: [],
+  allUsers: [],
+  advisorRequests: [],
+  customerRequests: [],
   deals: [],
   clientActivities: [],
   tgPosts: [],
@@ -2831,19 +2890,39 @@ let state = {
 
 // Navigation and role access
 const ADMIN_ONLY_PAGES = new Set(['advisors','admin','telegram','accounting','reports']);
+const CUSTOMER_ONLY_PAGES = new Set(['customer-marketplace','customer-requests']);
 const ADVISOR_ALLOWED_COLLECTIONS = new Set(['properties','clients','deals','reminders','followups','priceHistory','clientActivities']);
+function clearPrivateSessionState(){
+  if(typeof state === 'undefined' || !state) return;
+  Object.assign(state,{properties:[],marketplace:[],clients:[],advisors:[],allUsers:[],advisorRequests:[],customerRequests:[],deals:[],clientActivities:[],tgPosts:[],reminders:[],followups:[],priceHistory:[],accounting:[]});
+}
 function isAdmin(){ return !!currentUser && currentUser.role === 'admin'; }
-function canAccessPage(name){ return isAdmin() || !ADMIN_ONLY_PAGES.has(name); }
+function canAccessPage(name){
+  if(!currentUser) return false;
+  if(CUSTOMER_ONLY_PAGES.has(name)) return currentUser.role === 'customer';
+  if(isAdmin()) return true;
+  if(currentUser.role === 'customer') return false;
+  return !ADMIN_ONLY_PAGES.has(name);
+}
 function applyRoleAccess(){
   const admin = isAdmin();
   document.querySelectorAll('[data-admin-only="true"]').forEach(el => {
     el.style.display = admin ? '' : 'none';
   });
+  document.querySelectorAll('.nav-item,.mob-nav-item').forEach(el=>{
+    const fromClick = (el.getAttribute('onclick')||'').match(/showPage\('([^']+)'\)/);
+    const page = el.dataset.rolePage || el.dataset.section || (fromClick && fromClick[1]);
+    if(page) el.style.display = canAccessPage(page) ? '' : 'none';
+  });
+  document.querySelectorAll('.sidebar nav .nav-section').forEach(section=>{
+    const links = Array.from(section.querySelectorAll('.nav-item'));
+    if(links.length) section.style.display = links.some(link=>link.style.display !== 'none') ? '' : 'none';
+  });
 }
 function showPage(name) {
   if(!canAccessPage(name)){
-    console.warn('[access] blocked page for advisor:', name);
-    name = 'dashboard';
+    console.warn('[access] blocked page for role:', currentUser?.role, name);
+    name = currentUser?.role === 'customer' ? 'customer-marketplace' : 'dashboard';
   }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -2855,7 +2934,8 @@ function showPage(name) {
     commission:'محاسبه کمیسیون', calendar:'تقویم و یادآور',
     admin:'پنل مدیریت', profile:'پروفایل من',
     followups:'پیگیری مشتریان', 'price-history':'تاریخچه قیمت',
-    accounting:'حسابداری آژانس', reports:'گزارش‌ها و آمار', chat:'چت داخلی'
+    accounting:'حسابداری آژانس', reports:'گزارش‌ها و آمار', chat:'چت داخلی',
+    'customer-marketplace':'فایل‌های موجود', 'customer-requests':'درخواست مشاور', 'advisor-requests':'درخواست‌های مشاور'
   };
   document.getElementById('page-title').textContent = titles[name] || name;
   syncMobNav(name);
@@ -2872,10 +2952,138 @@ function showPage(name) {
   if(name==='accounting') renderAccounting();
   if(name==='chat'){ renderChatContacts(); }
   if(name==='price-history') renderPriceHistory();
+  if(name==='customer-marketplace') renderCustomerMarketplace();
+  if(name==='customer-requests') renderCustomerRequests();
+  if(name==='advisor-requests') renderAdvisorRequests();
   document.getElementById('user-menu').style.display = 'none';
 }
 
 // حالت ویرایش فرم‌ها
+function customerPropertyStatusLabel(status){
+  return ({sale:'فروش',rent:'اجاره',mortgage:'رهن کامل',rent_mortgage:'رهن و اجاره',presale:'پیش‌فروش',partnership:'مشارکت در ساخت',exchange:'معاوضه',in_progress:'در حال ساخت'})[status] || 'ملک';
+}
+function customerRequestStatusLabel(status){
+  return ({pending:'در انتظار بررسی مدیر',assigned:'به مشاور واگذار شد',contacted:'مشاور تماس گرفته',closed:'بسته‌شده'})[status] || status || 'نامشخص';
+}
+function openCustomerPropertyEdit(id){
+  if(currentUser?.role !== 'customer') return;
+  const property = state.properties.find(item=>sameId(item.id,id));
+  if(!property || property.customerSubmitterId !== currentUser.id) return notify('فقط فایل‌هایی که خودتان ثبت کرده‌اید قابل ویرایش هستند','var(--red)');
+  openEditProperty(id);
+}
+function renderCustomerMarketplace(){
+  if(currentUser?.role !== 'customer') return;
+  const grid = document.getElementById('marketplace-grid');
+  const ownEl = document.getElementById('customer-submissions-list');
+  if(!grid || !ownEl) return;
+  const query = (document.getElementById('market-search')?.value || '').trim().toLowerCase();
+  const type = document.getElementById('market-type')?.value || '';
+  const listings = (state.marketplace||[]).filter(item=>
+    (!type || item.type === type) &&
+    (!query || `${item.displayName||''} ${item.type||''} ${customerPropertyStatusLabel(item.status)}`.toLowerCase().includes(query))
+  );
+  if(!listings.length){
+    grid.innerHTML='<div class="empty-state" style="grid-column:1/-1;"><div class="icon">🏠</div><p>فایل منتشرشده‌ای با این مشخصات پیدا نشد</p></div>';
+  } else {
+    grid.innerHTML=listings.map(item=>{
+      const first = (item.images||[])[0];
+      const image = typeof first === 'string' ? first : (first?.url || first?.data || '');
+      const owner = escapeHTML(String(item._uid||''));
+      const id = escapeHTML(String(item.id||''));
+      const phone = safePhone(item.advisorPhone||'');
+      return `<article class="card" style="overflow:hidden;">
+        ${image ? `<img src="${safeURL(image)}" alt="تصویر ملک" style="width:100%;height:190px;object-fit:cover;background:var(--surface3);">` : `<div style="height:150px;display:grid;place-items:center;background:var(--surface2);font-size:42px;">🏠</div>`}
+        <div class="card-body"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;"><b>${escapeHTML(item.displayName||item.type||'ملک')}</b><span class="badge badge-blue">${escapeHTML(customerPropertyStatusLabel(item.status))}</span></div>
+        <div style="color:var(--text2);font-size:12px;margin:8px 0;">${escapeHTML(item.type||'ملک')}${item.area?` · ${escapeHTML(String(item.area))} متر مربع`:''}</div>
+        <div style="color:var(--accent);font-size:13px;">${propertyPriceHTML(item)}</div>
+        ${item.advisorName ? `<div style="margin-top:12px;font-size:12px;color:var(--text2);">مشاور: ${escapeHTML(item.advisorName)}</div>` : '<div style="margin-top:12px;font-size:12px;color:var(--text2);">برای این فایل، درخواست اتصال به مشاور لازم است.</div>'}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+          ${phone ? `<a class="btn btn-ghost btn-sm" href="tel:${phone}">تماس با مشاور · ${escapeHTML(item.advisorPhone)}</a>` : ''}
+          <button class="btn btn-primary btn-sm" data-owner-id="${owner}" data-record-id="${id}" onclick="requestAdvisorForProperty(this.dataset.ownerId,this.dataset.recordId)">درخواست مشاور</button>
+        </div></div></article>`;
+    }).join('');
+  }
+  if(!(state.properties||[]).length){
+    ownEl.innerHTML='<div class="empty-state"><div class="icon">📄</div><p>هنوز فایلی ثبت نکرده‌اید</p></div>';
+  } else {
+    const approvalLabel={pending:'در انتظار تأیید مدیر',approved:'منتشرشده',rejected:'نیازمند بررسی مجدد'};
+    ownEl.innerHTML=(state.properties||[]).map(item=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 0;border-bottom:1px solid var(--border);">
+      <div><b>${escapeHTML(item.title||item.type||'فایل ملک')}</b><div style="font-size:12px;color:var(--text2);margin-top:4px;">${escapeHTML(item.type||'ملک')} · ${escapeHTML(approvalLabel[item.approvalStatus||'pending']||'در انتظار تأیید مدیر')}</div></div>
+      <div style="display:flex;gap:8px;"><button class="btn btn-ghost btn-sm" data-property-id="${escapeHTML(String(item.id))}" onclick="openCustomerPropertyEdit(this.dataset.propertyId)">✏️ ویرایش</button>${item.images?.length?`<button class="btn btn-ghost btn-sm" data-property-id="${escapeHTML(String(item.id))}" onclick="openGallery(this.dataset.propertyId)">📸 تصاویر</button>`:''}</div>
+    </div>`).join('');
+  }
+}
+function requestAdvisorForProperty(ownerId,recordId){
+  if(currentUser?.role !== 'customer') return;
+  document.getElementById('customer-request-owner-id').value=ownerId||'';
+  document.getElementById('customer-request-property-id').value=recordId||'';
+  showPage('customer-requests');
+  document.getElementById('customer-request-message')?.focus();
+}
+async function requestAdvisorFromPortal(){
+  if(currentUser?.role !== 'customer') return;
+  const ownerId=document.getElementById('customer-request-owner-id')?.value||null;
+  const propertyId=document.getElementById('customer-request-property-id')?.value||null;
+  const message=document.getElementById('customer-request-message')?.value||'';
+  try{
+    const {error}=await _supabase.rpc('request_advisor',{p_property_owner_id:ownerId,p_property_id:propertyId,p_message:message});
+    if(error) throw error;
+    document.getElementById('customer-request-owner-id').value='';
+    document.getElementById('customer-request-property-id').value='';
+    document.getElementById('customer-request-message').value='';
+    notify('درخواست شما برای مدیر ارسال شد ✅');
+    await renderCustomerRequests();
+  }catch(error){ notify('ارسال درخواست انجام نشد: '+error.message,'var(--red)'); }
+}
+async function renderCustomerRequests(){
+  if(currentUser?.role !== 'customer') return;
+  const el=document.getElementById('customer-requests-list');
+  if(!el) return;
+  try{
+    const {data,error}=await _supabase.from('advisor_requests_visible').select('id,property_summary,message,status,created_at,assigned_advisor_name').eq('customer_id',currentUser.id).order('created_at',{ascending:false}).limit(100);
+    if(error) throw error;
+    state.customerRequests=data||[];
+    el.innerHTML=state.customerRequests.length?state.customerRequests.map(item=>`<div style="padding:12px 0;border-bottom:1px solid var(--border);"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;"><b>${escapeHTML(item.property_summary||'درخواست عمومی')}</b><span class="badge badge-gold">${escapeHTML(customerRequestStatusLabel(item.status))}</span></div><div style="font-size:12px;color:var(--text2);margin-top:5px;">${escapeHTML(item.message||'بدون پیام')}${item.assigned_advisor_name?` · مشاور: ${escapeHTML(item.assigned_advisor_name)}`:''}</div><small style="color:var(--text3);">${escapeHTML(new Date(item.created_at).toLocaleDateString('fa-IR'))}</small></div>`).join(''):'<div class="empty-state"><div class="icon">📨</div><p>درخواستی ثبت نشده است</p></div>';
+  }catch(error){ el.innerHTML=`<div class="empty-state"><p>بارگذاری درخواست‌ها انجام نشد: ${escapeHTML(error.message)}</p></div>`; }
+}
+async function renderAdvisorRequests(){
+  if(!currentUser || !['admin','advisor'].includes(currentUser.role)) return;
+  const el=document.getElementById('advisor-requests-list');
+  if(!el) return;
+  try{
+    const {data,error}=await _supabase.from('advisor_requests_visible').select('*').order('created_at',{ascending:false}).limit(200);
+    if(error) throw error;
+    state.advisorRequests=data||[];
+    if(!state.advisorRequests.length){ el.innerHTML='<div class="empty-state"><div class="icon">📨</div><p>درخواستی برای نمایش وجود ندارد</p></div>'; return; }
+    const statusLabel={pending:'در انتظار',assigned:'واگذارشده',contacted:'تماس گرفته شد',closed:'بسته‌شده'};
+    el.innerHTML='<div style="overflow-x:auto;"><table><thead><tr><th>مشتری و تماس</th><th>موضوع و پیام</th><th>وضعیت</th><th>واگذاری / اقدام</th></tr></thead><tbody>'+state.advisorRequests.map(item=>{
+      const phone=safePhone(item.customer_phone||'');
+      const assignControl=isAdmin()?`<select data-request-id="${escapeHTML(item.id)}" onchange="assignAdvisorRequest(this.dataset.requestId,this.value)"><option value="">بدون مشاور</option>${(state.advisors||[]).filter(a=>a.status==='active'&&a.role==='advisor').map(a=>`<option value="${escapeHTML(a.id)}" ${item.assigned_advisor_id===a.id?'selected':''}>${escapeHTML(a.fullname||a.name||'مشاور')}</option>`).join('')}</select>`:item.status==='closed'?'<span>پایان‌یافته</span>':`<button class="btn btn-ghost btn-sm" data-request-id="${escapeHTML(item.id)}" onclick="updateAdvisorRequestStatus(this.dataset.requestId,'contacted')">ثبت تماس</button> <button class="btn btn-primary btn-sm" data-request-id="${escapeHTML(item.id)}" onclick="updateAdvisorRequestStatus(this.dataset.requestId,'closed')">بستن</button>`;
+      return `<tr><td><b>${escapeHTML(item.customer_name||'مشتری')}</b><br>${phone?`<a href="tel:${phone}" style="color:var(--blue);direction:ltr;display:inline-block;">${escapeHTML(item.customer_phone)}</a>`:'—'}</td><td>${escapeHTML(item.property_summary||'درخواست عمومی')}<div style="font-size:11px;color:var(--text2);margin-top:4px;">${escapeHTML(item.message||'بدون پیام')}</div></td><td>${escapeHTML(statusLabel[item.status]||item.status)}</td><td>${assignControl}</td></tr>`;
+    }).join('')+'</tbody></table></div>';
+  }catch(error){ el.innerHTML=`<div class="empty-state"><p>بارگذاری درخواست‌ها انجام نشد: ${escapeHTML(error.message)}</p></div>`; }
+}
+async function assignAdvisorRequest(requestId,advisorId){
+  if(!isAdmin()) return;
+  try{ const {error}=await _supabase.rpc('manager_assign_advisor_request',{p_request_id:requestId,p_advisor_id:advisorId||null}); if(error) throw error; notify('درخواست به‌روزرسانی شد ✅'); await renderAdvisorRequests(); }
+  catch(error){ notify('واگذاری انجام نشد: '+error.message,'var(--red)'); await renderAdvisorRequests(); }
+}
+async function updateAdvisorRequestStatus(requestId,status){
+  if(currentUser?.role!=='advisor') return;
+  try{ const {error}=await _supabase.rpc('advisor_update_request_status',{p_request_id:requestId,p_status:status}); if(error) throw error; notify('وضعیت درخواست ذخیره شد ✅'); await renderAdvisorRequests(); }
+  catch(error){ notify('به‌روزرسانی انجام نشد: '+error.message,'var(--red)'); }
+}
+async function copyCustomerSignupLink(){
+  const url=new URL(window.location.href);
+  url.search=''; url.hash=''; url.searchParams.set('signup','customer');
+  try{ await navigator.clipboard.writeText(url.toString()); notify('لینک ثبت‌نام مشتری کپی شد؛ آن را برای مشتری بفرستید ✅'); }
+  catch(error){ window.prompt('این لینک را برای مشتری بفرستید:',url.toString()); }
+}
+async function changeUserRole(userId,role){
+  if(!isAdmin() || !['admin','advisor','customer'].includes(role)) return;
+  try{ const {error}=await _supabase.rpc('admin_change_user_role',{p_user_id:userId,p_role:role}); if(error) throw error; notify('نقش کاربر تغییر کرد ✅'); await renderAdminPage(); }
+  catch(error){ notify('تغییر نقش انجام نشد: '+error.message,'var(--red)'); await renderAdminPage(); }
+}
 let editingPropertyId = null;
 let editingClientId = null;
 let editingAdvisorId = null;
@@ -3560,7 +3768,7 @@ function openPropertyDetails(id){
 
   const title = p.title || 'ملک بدون عنوان';
   const status = PROPERTY_STATUS_LABELS[p.status] || p.status || 'نامشخص';
-  const approval = PROPERTY_APPROVAL_LABELS[p.approvalStatus || 'approved'] || p.approvalStatus || 'نامشخص';
+  const approval = PROPERTY_APPROVAL_LABELS[p.approvalStatus || 'pending'] || p.approvalStatus || 'نامشخص';
   const address = p.address || (p.extra && (p.extra['p-address'] || p.extra.address || p.extra.location || p.extra['p-location'])) || '';
   const images = (p.images || []).map(img => typeof img === 'string' ? {src:img,name:''} : {src:img.url || img.data,name:img.name || ''}).filter(img => img.src);
   const extraEntries = Object.entries(p.extra || {}).filter(([,value]) => value !== null && value !== undefined && String(value) !== '');
@@ -3783,6 +3991,7 @@ function openEditProperty(id){
 }
 
 async function saveProperty(){
+  const isCustomer = currentUser?.role === 'customer';
   const title = document.getElementById('p-title').value.trim();
   if(!title){ notify('عنوان ملک را وارد کنید','var(--red)'); return; }
 
@@ -3834,21 +4043,22 @@ async function saveProperty(){
       lng: toNumber(document.getElementById('p-lng')?.value) || null,
       id: docId,
       // وضعیت تایید ملک موجود حفظ می‌شود؛ ملک جدید طبق نقش ثبت‌کننده تعیین می‌شود.
-      approvalStatus: existing?.approvalStatus || ((currentUser.role === 'admin') ? 'approved' : 'pending')
+      approvalStatus: isCustomer ? 'pending' : (existing?.approvalStatus || ((currentUser.role === 'admin') ? 'approved' : 'pending'))
     };
-    await withTimeout(
-      saveRecordToOwner('properties', propData, ownerUid),
-      12000,
-      'ذخیره اطلاعات بیش از ۱۲ ثانیه طول کشید'
-    );
-    const priceHistoryRecords = isEditing
-      ? await recordPropertyPriceChanges(existing, propData, ownerUid)
-      : [];
-    if(isEditing){
-      const index = state.properties.findIndex(item => sameId(item.id, docId));
-      if(index >= 0) state.properties[index] = propData;
+    let priceHistoryRecords = [];
+    if(isCustomer){
+      const {error}=await _supabase.rpc('save_customer_property_submission',{p_record_id:docId,p_payload:_cleanObj(propData)});
+      if(error) throw error;
+      const {data,error:reloadError}=await _supabase.rpc('get_my_property_submissions');
+      if(reloadError) throw reloadError;
+      state.properties=await refreshSignedPropertyImages((data||[]).map(row=>({...row.payload,id:row.record_id,_uid:row.owner_id})));
     } else {
-      state.properties.unshift(propData);
+      await withTimeout(saveRecordToOwner('properties', propData, ownerUid),12000,'ذخیره اطلاعات بیش از ۱۲ ثانیه طول کشید');
+      priceHistoryRecords = isEditing ? await recordPropertyPriceChanges(existing, propData, ownerUid) : [];
+      if(isEditing){
+        const index = state.properties.findIndex(item => sameId(item.id, docId));
+        if(index >= 0) state.properties[index] = propData;
+      } else state.properties.unshift(propData);
     }
 
     currentImages = []; currentVideos = [];
@@ -3865,9 +4075,12 @@ async function saveProperty(){
     const pLng = document.getElementById('p-lng'); if(pLng) pLng.value='';
     closeModal('prop-modal');
     backToPropStep1();
-    renderProperties(); updateCounts();
-    if(document.getElementById('page-price-history')?.classList.contains('active')) renderPriceHistory();
-    const imageNotice = isEditing
+    if(isCustomer) renderCustomerMarketplace();
+    else { renderProperties(); updateCounts(); }
+    if(!isCustomer && document.getElementById('page-price-history')?.classList.contains('active')) renderPriceHistory();
+    const imageNotice = isCustomer
+      ? 'فایل شما برای بررسی و تأیید مدیر ارسال شد؛ پس از ویرایش نیز دوباره بررسی می‌شود ✅'
+      : isEditing
       ? (priceHistoryRecords.length ? `ملک و ${priceHistoryRecords.length} سابقه تغییر قیمت ذخیره شد ✅` : 'اطلاعات ملک با موفقیت ویرایش شد ✅')
       : inlineImageResult.skipped
         ? `ملک ذخیره شد؛ ${inlineImageResult.images.length} تصویر ذخیره شد و ${inlineImageResult.skipped} تصویر به‌دلیل محدودیت حجم کنار گذاشته شد`
@@ -3927,7 +4140,7 @@ function renderProperties(){
 
   if(fType)   list = list.filter(p => p.type === fType);
   if(fStatus) list = list.filter(p => p.status === fStatus);
-  if(fApproval) list = list.filter(p => (p.approvalStatus||'approved') === fApproval);
+  if(fApproval) list = list.filter(p => (p.approvalStatus||'pending') === fApproval);
   if(fPriceMin) list = list.filter(p => getPropPrice(p) >= fPriceMin);
   if(fPriceMax) list = list.filter(p => getPropPrice(p) > 0 && getPropPrice(p) <= fPriceMax);
   if(fAreaMin) list = list.filter(p => getPropArea(p) >= fAreaMin);
@@ -3975,7 +4188,7 @@ function renderProperties(){
 
   el.innerHTML = `<table><thead><tr><th>تصویر</th><th>عنوان</th><th>نوع</th><th>متراژ</th><th>قیمت</th><th>وضعیت ملک</th><th>تایید</th><th>مالک</th><th>تماس</th><th>عملیات</th><th>آگهی</th></tr></thead><tbody>
   ${list.map(p=>{
-    const approval = p.approvalStatus || 'approved'; // فایل‌های قدیمی به صورت پیشفرض تایید شده
+    const approval = p.approvalStatus || 'pending';
     // قفل حذف: مشاور نمی‌تواند فایل تایید شده را حذف کند
     const canDelete = isAdmin || approval !== 'approved';
     const adImagesB64 = (p.images||[]).map(im=>im.url||im.data).filter(Boolean);
@@ -4067,11 +4280,13 @@ function renderProperties(){
 
 // تغییر وضعیت تایید توسط مدیر
 async function setApproval(id, newStatus){
+  if(!isAdmin() || !['approved','pending','rejected'].includes(newStatus)) return;
   try {
     const prop = state.properties.find(p=>sameId(p.id, id));
     if(!prop) return;
+    const next={...prop,approvalStatus:newStatus};
+    await backend().setDoc(backend().doc(backend().db, `users/${prop.userId}/properties/${prop.id}`), _cleanObj(next));
     prop.approvalStatus = newStatus;
-    await backend().setDoc(backend().doc(backend().db, `users/${prop.userId}/properties/${prop.id}`), _cleanObj(prop));
     renderProperties();
     const msgMap = {approved:'ملک تایید شد ✅', pending:'به حالت در انتظار برگشت', rejected:'ملک رد شد'};
     notify(msgMap[newStatus] || 'بروزرسانی شد');
@@ -4164,10 +4379,11 @@ function postToSheypoor(p){
 }
 
 async function deleteProp(id){
+  if(currentUser?.role === 'customer'){ notify('امکان حذف فایل ثبت‌شده برای مشتری وجود ندارد','var(--red)'); return; }
   try {
     const prop = state.properties.find(p=>sameId(p.id, id));
     // محافظت: اگر فایل تایید شده و کاربر ادمین نیست، اجازه حذف ندارد
-    const approval = prop ? (prop.approvalStatus || 'approved') : 'approved';
+  const approval = prop ? (prop.approvalStatus || 'pending') : 'pending';
     const isAdmin = currentUser && currentUser.role === 'admin';
     if(prop && approval === 'approved' && !isAdmin){
       notify('این فایل تایید شده و قابل حذف توسط مشاور نیست','var(--red)');
@@ -5403,7 +5619,7 @@ function renderAdvisorDashboard(){
   const myFollowups = (state.followups||[]).filter(f => f.userId === currentUser.id);
   const today = siteToday();
   const todayFollowups = myFollowups.filter(f => normalizeSiteDate(f.nextDate) === today);
-  const pendingProps = myProps.filter(p => (p.approvalStatus||'approved') === 'pending');
+  const pendingProps = myProps.filter(p => (p.approvalStatus||'pending') === 'pending');
 
   const el = document.getElementById('advisor-dashboard');
   if(!el) return;
@@ -5608,10 +5824,16 @@ function matchProperties(clientId) {
 }
 
 // Auth state listener (placed here so all functions are defined)
+let authLoadSequence = 0;
 _auth.onAuthStateChanged(async function(authUser) {
+  const loadSequence=++authLoadSequence;
+  currentUser=null;
+  showAuthScreen();
+  clearPrivateSessionState();
   if (authUser) {
     try {
       const snap = await _db.doc('users/' + authUser.uid).get();
+      if(loadSequence !== authLoadSequence) return;
       if (snap.exists) {
         const profile = snap.data();
         if (profile.status === 'disabled') {
@@ -5628,8 +5850,15 @@ _auth.onAuthStateChanged(async function(authUser) {
           document.getElementById('auth-pending-box').style.display  = 'block';
           return;
         }
+        if(profile.status !== 'active' || !['admin','advisor','customer'].includes(profile.role)){
+          await _auth.signOut();
+          showAuthScreen();
+          switchAuthTab('login');
+          showLoginError('وضعیت یا نقش حساب معتبر نیست؛ با مدیر مجموعه تماس بگیرید.');
+          return;
+        }
         currentUser = Object.assign({}, profile, { id: authUser.uid, email: authUser.email });
-        await showApp();
+        await showApp(loadSequence);
       } else {
         await _auth.signOut();
         showAuthScreen();
@@ -5637,7 +5866,9 @@ _auth.onAuthStateChanged(async function(authUser) {
         showLoginError('پروفایل کاربر پیدا نشد؛ با مدیر سیستم تماس بگیرید.');
       }
     } catch(e) {
+      if(loadSequence !== authLoadSequence) return;
       console.error('Auth state error:', e);
+      clearPrivateSessionState();
       await _auth.signOut();
       showAuthScreen();
       switchAuthTab('login');
@@ -6102,7 +6333,7 @@ function exportExcel(){
   state.properties.forEach(p => {
     const price = p.price || p.mortgage || p.rent || '';
     const area = getPropArea(p) || '';
-    rows.push([p.title, p.type, p.status, price, area, p.ownerName||'', p.ownerPhone||'', siteDateDisplay(p.date)||'', p.approvalStatus||'approved']);
+    rows.push([p.title, p.type, p.status, price, area, p.ownerName||'', p.ownerPhone||'', siteDateDisplay(p.date)||'', p.approvalStatus||'pending']);
   });
 
   let csv = '﻿'; // BOM for Excel UTF-8
