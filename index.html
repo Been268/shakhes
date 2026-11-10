@@ -3198,7 +3198,7 @@ function openNewClientModal(){
   setFieldValue('c-name',''); setFieldValue('c-phone',''); setFieldValue('c-request','خرید');
   setFieldValue('c-priority','mid'); setFieldValue('c-area',''); setFieldValue('c-source',''); setFieldValue('c-notes','');
   setFieldValue('c-reminder-enabled', false);
-  updateClientFields();
+  updateClientFields('');
   const heading = document.querySelector('#client-modal .modal-title');
   if(heading) heading.textContent = '👤 ثبت مشتری جدید';
   const saveButton = document.querySelector('#client-modal .form-actions .btn-primary');
@@ -4407,9 +4407,24 @@ async function deleteProp(id){
 
 // --- CLIENTS ---
 // --- CLIENT DYNAMIC FIELDS ---
-function updateClientFields() {
+function clientPropertyTypeOptions(selectedValue='') {
+  const standardTypes = ['آپارتمان','ویلا','زمین','تجاری','مشارکت در ساخت','سایر'];
+  const inventoryTypes = [...new Set((state.properties || []).map(p => String(p.type || '').trim()).filter(Boolean))];
+  const types = inventoryTypes.length ? inventoryTypes : standardTypes;
+  if(selectedValue && !types.includes(selectedValue)) types.push(selectedValue);
+  if(!types.includes('سایر')) types.push('سایر');
+  const order = [...standardTypes, ...types.filter(type => !standardTypes.includes(type))];
+  const uniqueTypes = [...new Set(order.filter(type => types.includes(type)))];
+  return [
+    {v:'',l:'فرقی ندارد'},
+    ...uniqueTypes.map(type => ({v:type,l:type}))
+  ];
+}
+
+function updateClientFields(selectedPropertyType) {
   const req = document.getElementById('c-request').value;
   const container = document.getElementById('c-dynamic-fields');
+  const priorPropertyType = selectedPropertyType ?? gVal('c-prop-type');
 
   const fg = (id, label, el) =>
     `<div class="form-group"><label>${label}</label>${el}</div>`;
@@ -4421,12 +4436,10 @@ function updateClientFields() {
     `<input type="text" id="${id}" placeholder="${ph}">`;
   const sel = (id, opts) =>
     `<select id="${id}">${opts.map(o => typeof o==='string'
-      ? `<option>${o}</option>`
-      : `<option value="${o.v}">${o.l}</option>`).join('')}</select>`;
+      ? `<option>${escapeHTML(o)}</option>`
+      : `<option value="${escapeHTML(o.v)}">${escapeHTML(o.l)}</option>`).join('')}</select>`;
 
-  const propTypeSel = sel('c-prop-type', [
-    'آپارتمان','ویلا','زمین','تجاری','مشارکت در ساخت','سایر'
-  ]);
+  const propTypeSel = sel('c-prop-type', clientPropertyTypeOptions(priorPropertyType));
   const directionSel = sel('c-direction', [
     {v:'',l:'فرقی ندارد'},{v:'شمالی',l:'شمالی'},{v:'جنوبی',l:'جنوبی'},
     {v:'شرقی',l:'شرقی'},{v:'غربی',l:'غربی'}
@@ -4460,7 +4473,7 @@ function updateClientFields() {
 
   if(req === 'خرید') {
     html += `🏠 مشخصات ملک مورد نظر</div><div class="form-grid">`;
-    html += fg('c-prop-type','نوع ملک', propTypeSel);
+    html += fg('c-prop-type','نوع ملک (بر اساس فایل‌های ثبت‌شده)', propTypeSel);
     html += fg('c-budget','حداکثر بودجه (تومان)', numInput('c-budget','0'));
     html += fg('c-price-per-m','حداکثر قیمت هر متر (تومان)', numInput('c-price-per-m','0'));
     html += fg('c-area-min','حداقل متراژ (م²)', numInput('c-area-min','0'));
@@ -4478,7 +4491,7 @@ function updateClientFields() {
 
   } else if(req === 'اجاره') {
     html += `🔑 مشخصات اجاره مورد نظر</div><div class="form-grid">`;
-    html += fg('c-prop-type','نوع ملک', propTypeSel);
+    html += fg('c-prop-type','نوع ملک (بر اساس فایل‌های ثبت‌شده)', propTypeSel);
     html += fg('c-rent-max','حداکثر اجاره ماهیانه (تومان)', numInput('c-rent-max','0'));
     html += fg('c-deposit-max','حداکثر پیش پرداخت (تومان)', numInput('c-deposit-max','0'));
     html += fg('c-area-min','حداقل متراژ (م²)', numInput('c-area-min','0'));
@@ -4493,7 +4506,7 @@ function updateClientFields() {
 
   } else if(req === 'رهن') {
     html += `🤝 مشخصات رهن مورد نظر</div><div class="form-grid">`;
-    html += fg('c-prop-type','نوع ملک', propTypeSel);
+    html += fg('c-prop-type','نوع ملک (بر اساس فایل‌های ثبت‌شده)', propTypeSel);
     html += fg('c-budget','مبلغ رهن کامل (تومان)', numInput('c-budget','0'));
     html += fg('c-area-min','حداقل متراژ (م²)', numInput('c-area-min','0'));
     html += fg('c-rooms-min','حداقل اتاق', roomSel);
@@ -4506,7 +4519,7 @@ function updateClientFields() {
 
   } else if(req === 'رهن و اجاره') {
     html += `🔄 مشخصات رهن و اجاره مورد نظر</div><div class="form-grid">`;
-    html += fg('c-prop-type','نوع ملک', propTypeSel);
+    html += fg('c-prop-type','نوع ملک (بر اساس فایل‌های ثبت‌شده)', propTypeSel);
     html += fg('c-budget','حداکثر رهن (تومان)', numInput('c-budget','0'));
     html += fg('c-rent-max','حداکثر اجاره ماهیانه (تومان)', numInput('c-rent-max','0'));
     html += fg('c-area-min','حداقل متراژ (م²)', numInput('c-area-min','0'));
@@ -4521,7 +4534,7 @@ function updateClientFields() {
 
   } else if(req === 'فروش') {
     html += `🏷️ مشخصات ملک برای فروش</div><div class="form-grid">`;
-    html += fg('c-prop-type','نوع ملک', propTypeSel);
+    html += fg('c-prop-type','نوع ملک (بر اساس فایل‌های ثبت‌شده)', propTypeSel);
     html += fg('c-budget','قیمت پیشنهادی فروش (تومان)', numInput('c-budget','0'));
     html += fg('c-price-per-m','قیمت هر متر (تومان)', numInput('c-price-per-m','0'));
     html += fg('c-area-min','متراژ ملک (م²)', numInput('c-area-min','0'));
@@ -4548,6 +4561,7 @@ function updateClientFields() {
   }
 
   container.innerHTML = html;
+  if(priorPropertyType && document.getElementById('c-prop-type')) setFieldValue('c-prop-type', priorPropertyType);
   refreshMoneyWordInputs(container);
 }
 
@@ -4563,7 +4577,7 @@ function openEditClient(id){
   setFieldValue('c-source', c.source || '');
   setFieldValue('c-notes', c.notes || '');
   setFieldValue('c-reminder-enabled', !!c.reminderEnabled && c.reminderStatus !== 'completed');
-  updateClientFields();
+  updateClientFields(c.dynFields?.['prop-type'] || '');
   Object.entries(c.dynFields || {}).forEach(([key, value]) => setFieldValue(`c-${key}`, value));
   const heading = document.querySelector('#client-modal .modal-title');
   if(heading) heading.textContent = '✏️ ویرایش مشتری';
