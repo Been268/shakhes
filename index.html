@@ -3086,6 +3086,7 @@ async function changeUserRole(userId,role){
 }
 let editingPropertyId = null;
 let editingClientId = null;
+let clientDynamicFieldCache = {};
 let editingAdvisorId = null;
 let editingDealId = null;
 let dealNewFiles = {propertyPhotos:[],dealDocuments:[]};
@@ -3195,10 +3196,11 @@ function openNewIncomeModal(){
 }
 function openNewClientModal(){
   editingClientId = null;
+  clientDynamicFieldCache = {};
   setFieldValue('c-name',''); setFieldValue('c-phone',''); setFieldValue('c-request','خرید');
   setFieldValue('c-priority','mid'); setFieldValue('c-area',''); setFieldValue('c-source',''); setFieldValue('c-notes','');
   setFieldValue('c-reminder-enabled', false);
-  updateClientFields('');
+  updateClientFields('', false);
   const heading = document.querySelector('#client-modal .modal-title');
   if(heading) heading.textContent = '👤 ثبت مشتری جدید';
   const saveButton = document.querySelector('#client-modal .form-actions .btn-primary');
@@ -4421,10 +4423,15 @@ function clientPropertyTypeOptions(selectedValue='') {
   ];
 }
 
-function updateClientFields(selectedPropertyType) {
+function updateClientFields(selectedPropertyType, preserveValues=true) {
   const req = document.getElementById('c-request').value;
   const container = document.getElementById('c-dynamic-fields');
   const priorPropertyType = selectedPropertyType ?? gVal('c-prop-type');
+  const priorDynamicValues = {};
+  if(preserveValues) container.querySelectorAll('input,select,textarea').forEach(el => { if(el.id) clientDynamicFieldCache[el.id] = el.value; });
+  const isLand = priorPropertyType === 'زمین';
+  const isResidential = ['آپارتمان','ویلا'].includes(priorPropertyType);
+  const isBuiltProperty = !isLand;
 
   const fg = (id, label, el) =>
     `<div class="form-group"><label>${label}</label>${el}</div>`;
@@ -4439,7 +4446,8 @@ function updateClientFields(selectedPropertyType) {
       ? `<option>${escapeHTML(o)}</option>`
       : `<option value="${escapeHTML(o.v)}">${escapeHTML(o.l)}</option>`).join('')}</select>`;
 
-  const propTypeSel = sel('c-prop-type', clientPropertyTypeOptions(priorPropertyType));
+  const propTypeOptions = clientPropertyTypeOptions(priorPropertyType).map(o => typeof o === 'string' ? `<option>${escapeHTML(o)}</option>` : `<option value="${escapeHTML(o.v)}">${escapeHTML(o.l)}</option>`).join('');
+  const propTypeSel = `<select id="c-prop-type" onchange="updateClientFields(this.value)">${propTypeOptions}</select>`;
   const directionSel = sel('c-direction', [
     {v:'',l:'فرقی ندارد'},{v:'شمالی',l:'شمالی'},{v:'جنوبی',l:'جنوبی'},
     {v:'شرقی',l:'شرقی'},{v:'غربی',l:'غربی'}
@@ -4478,14 +4486,14 @@ function updateClientFields(selectedPropertyType) {
     html += fg('c-price-per-m','حداکثر قیمت هر متر (تومان)', numInput('c-price-per-m','0'));
     html += fg('c-area-min','حداقل متراژ (م²)', numInput('c-area-min','0'));
     html += fg('c-area-max','حداکثر متراژ (م²)', numInput('c-area-max','0'));
-    html += fg('c-rooms-min','حداقل اتاق', roomSel);
-    html += fg('c-floor-pref','ترجیح طبقه', floorSel);
+    if(isResidential) html += fg('c-rooms-min','حداقل اتاق', roomSel);
+    if(!isLand) html += fg('c-floor-pref','ترجیح طبقه', floorSel);
     html += fg('c-direction','جهت ترجیحی', directionSel);
-    html += fg('c-parking-need','پارکینگ', parkSel);
-    html += fg('c-elevator','آسانسور', sel('c-elevator',[{v:'',l:'فرقی ندارد'},{v:'دارد',l:'الزامی'}]));
-    html += fg('c-storage','انباری', sel('c-storage',[{v:'',l:'فرقی ندارد'},{v:'دارد',l:'الزامی'}]));
+    if(isBuiltProperty) html += fg('c-parking-need','پارکینگ', parkSel);
+    if(isBuiltProperty) html += fg('c-elevator','آسانسور', sel('c-elevator',[{v:'',l:'فرقی ندارد'},{v:'دارد',l:'الزامی'}]));
+    if(isResidential) html += fg('c-storage','انباری', sel('c-storage',[{v:'',l:'فرقی ندارد'},{v:'دارد',l:'الزامی'}]));
     html += fg('c-deed-pref','نوع سند', docSel);
-    html += fg('c-max-year','حداکثر سن بنا (سال)', numInput('c-max-year','0'));
+    if(isBuiltProperty) html += fg('c-max-year','حداکثر سن بنا (سال)', numInput('c-max-year','0'));
     html += fgFull('c-extra-needs','امکانات الزامی', txtInput('c-extra-needs','مثال: استخر، سیستم هوشمند، ...'));
     html += '</div>';
 
@@ -4495,12 +4503,12 @@ function updateClientFields(selectedPropertyType) {
     html += fg('c-rent-max','حداکثر اجاره ماهیانه (تومان)', numInput('c-rent-max','0'));
     html += fg('c-deposit-max','حداکثر پیش پرداخت (تومان)', numInput('c-deposit-max','0'));
     html += fg('c-area-min','حداقل متراژ (م²)', numInput('c-area-min','0'));
-    html += fg('c-rooms-min','حداقل اتاق', roomSel);
-    html += fg('c-floor-pref','ترجیح طبقه', floorSel);
+    if(isResidential) html += fg('c-rooms-min','حداقل اتاق', roomSel);
+    if(!isLand) html += fg('c-floor-pref','ترجیح طبقه', floorSel);
     html += fg('c-direction','جهت ترجیحی', directionSel);
-    html += fg('c-parking-need','پارکینگ', parkSel);
-    html += fg('c-elevator','آسانسور', sel('c-elevator',[{v:'',l:'فرقی ندارد'},{v:'دارد',l:'الزامی'}]));
-    html += fg('c-pets','حیوان خانگی', sel('c-pets',[{v:'',l:'ندارد'},{v:'دارد',l:'دارد (نیاز به تأیید مالک)'}]));
+    if(isBuiltProperty) html += fg('c-parking-need','پارکینگ', parkSel);
+    if(isBuiltProperty) html += fg('c-elevator','آسانسور', sel('c-elevator',[{v:'',l:'فرقی ندارد'},{v:'دارد',l:'الزامی'}]));
+    if(isBuiltProperty) html += fg('c-pets','حیوان خانگی', sel('c-pets',[{v:'',l:'ندارد'},{v:'دارد',l:'دارد (نیاز به تأیید مالک)'}]));
     html += fgFull('c-extra-needs','شرایط خاص', txtInput('c-extra-needs','مثال: بچه‌دار، محدودیت زمانی، ...'));
     html += '</div>';
 
@@ -4509,11 +4517,11 @@ function updateClientFields(selectedPropertyType) {
     html += fg('c-prop-type','نوع ملک (بر اساس فایل‌های ثبت‌شده)', propTypeSel);
     html += fg('c-budget','مبلغ رهن کامل (تومان)', numInput('c-budget','0'));
     html += fg('c-area-min','حداقل متراژ (م²)', numInput('c-area-min','0'));
-    html += fg('c-rooms-min','حداقل اتاق', roomSel);
-    html += fg('c-floor-pref','ترجیح طبقه', floorSel);
+    if(isResidential) html += fg('c-rooms-min','حداقل اتاق', roomSel);
+    if(!isLand) html += fg('c-floor-pref','ترجیح طبقه', floorSel);
     html += fg('c-direction','جهت ترجیحی', directionSel);
-    html += fg('c-parking-need','پارکینگ', parkSel);
-    html += fg('c-elevator','آسانسور', sel('c-elevator',[{v:'',l:'فرقی ندارد'},{v:'دارد',l:'الزامی'}]));
+    if(isBuiltProperty) html += fg('c-parking-need','پارکینگ', parkSel);
+    if(isBuiltProperty) html += fg('c-elevator','آسانسور', sel('c-elevator',[{v:'',l:'فرقی ندارد'},{v:'دارد',l:'الزامی'}]));
     html += fgFull('c-extra-needs','شرایط خاص', txtInput('c-extra-needs','مثال: مدت قرارداد، ...'));
     html += '</div>';
 
@@ -4523,11 +4531,11 @@ function updateClientFields(selectedPropertyType) {
     html += fg('c-budget','حداکثر رهن (تومان)', numInput('c-budget','0'));
     html += fg('c-rent-max','حداکثر اجاره ماهیانه (تومان)', numInput('c-rent-max','0'));
     html += fg('c-area-min','حداقل متراژ (م²)', numInput('c-area-min','0'));
-    html += fg('c-rooms-min','حداقل اتاق', roomSel);
-    html += fg('c-floor-pref','ترجیح طبقه', floorSel);
+    if(isResidential) html += fg('c-rooms-min','حداقل اتاق', roomSel);
+    if(!isLand) html += fg('c-floor-pref','ترجیح طبقه', floorSel);
     html += fg('c-direction','جهت ترجیحی', directionSel);
-    html += fg('c-parking-need','پارکینگ', parkSel);
-    html += fg('c-elevator','آسانسور', sel('c-elevator',[{v:'',l:'فرقی ندارد'},{v:'دارد',l:'الزامی'}]));
+    if(isBuiltProperty) html += fg('c-parking-need','پارکینگ', parkSel);
+    if(isBuiltProperty) html += fg('c-elevator','آسانسور', sel('c-elevator',[{v:'',l:'فرقی ندارد'},{v:'دارد',l:'الزامی'}]));
     html += fg('c-convert-pref','ترجیح تبدیل رهن/اجاره', sel('c-convert-pref',[{v:'',l:'فرقی ندارد'},{v:'رهن بیشتر',l:'رهن بیشتر'},{v:'اجاره بیشتر',l:'اجاره بیشتر'}]));
     html += fgFull('c-extra-needs','شرایط خاص', txtInput('c-extra-needs','...'));
     html += '</div>';
@@ -4539,7 +4547,7 @@ function updateClientFields(selectedPropertyType) {
     html += fg('c-price-per-m','قیمت هر متر (تومان)', numInput('c-price-per-m','0'));
     html += fg('c-area-min','متراژ ملک (م²)', numInput('c-area-min','0'));
     html += fg('c-deed-pref','نوع سند', docSel);
-    html += fg('c-floor-pref','طبقه ملک', floorSel);
+    if(!isLand) html += fg('c-floor-pref','طبقه ملک', floorSel);
     html += fg('c-direction','جهت ملک', directionSel);
     html += fg('c-sell-deadline','مدت زمان برای فروش', sel('c-sell-deadline',[{v:'',l:'مشخص نیست'},{v:'فوری',l:'فوری'},{v:'۱ ماه',l:'تا ۱ ماه'},{v:'۳ ماه',l:'تا ۳ ماه'},{v:'بیشتر',l:'بیشتر از ۳ ماه'}]));
     html += fg('c-loan-status','وضعیت وام', sel('c-loan-status',[{v:'ندارد',l:'وام ندارد'},{v:'وام قابل انتقال',l:'وام قابل انتقال'},{v:'وام غیرقابل انتقال',l:'وام غیرقابل انتقال'}]));
@@ -4548,11 +4556,12 @@ function updateClientFields(selectedPropertyType) {
 
   } else if(req === 'مشارکت در ساخت') {
     html += `🏗️ مشخصات مشارکت در ساخت</div><div class="form-grid">`;
+    html += fg('c-prop-type','نوع ملک', propTypeSel);
     html += fg('c-partner-role', 'نقش در مشارکت', sel('c-partner-role',[{v:'مالک',l:'🏠 مالک زمین/ملک'},{v:'سازنده',l:'🏗️ سازنده/مجری'}]));
     html += fg('c-budget','ارزش تخمینی زمین/ملک (تومان)', numInput('c-budget','0'));
     html += fg('c-area-min','مساحت زمین (م²)', numInput('c-area-min','0'));
     html += fg('c-partner-usage','کاربری مورد نظر', partnerUsageSel);
-    html += fg('c-partner-floors','طبقات مورد نظر', numInput('c-partner-floors','0'));
+    if(!isLand) html += fg('c-partner-floors','طبقات مورد نظر', numInput('c-partner-floors','0'));
     html += fg('c-owner-share-want','سهم درخواستی مالک (%)', numInput('c-owner-share-want','50'));
     html += fg('c-deed-pref','نوع سند زمین', docSel);
     html += fg('c-partner-timeline','زمان‌بندی اجرا', sel('c-partner-timeline',[{v:'',l:'مشخص نیست'},{v:'فوری',l:'شروع فوری'},{v:'۶ ماه',l:'ظرف ۶ ماه'},{v:'۱ سال',l:'ظرف ۱ سال'}]));
@@ -4561,6 +4570,7 @@ function updateClientFields(selectedPropertyType) {
   }
 
   container.innerHTML = html;
+  Object.entries(clientDynamicFieldCache).forEach(([id,value]) => { if(document.getElementById(id)) setFieldValue(id,value); });
   if(priorPropertyType && document.getElementById('c-prop-type')) setFieldValue('c-prop-type', priorPropertyType);
   refreshMoneyWordInputs(container);
 }
@@ -4569,6 +4579,7 @@ function openEditClient(id){
   const c = state.clients.find(item => sameId(item.id, id));
   if(!c) return;
   editingClientId = String(c.id);
+  clientDynamicFieldCache = Object.fromEntries(Object.entries(c.dynFields || {}).map(([key,value]) => [`c-${key}`,value]));
   setFieldValue('c-name', c.name || '');
   setFieldValue('c-phone', c.phone || '');
   setFieldValue('c-request', c.request || 'خرید');
@@ -4577,7 +4588,7 @@ function openEditClient(id){
   setFieldValue('c-source', c.source || '');
   setFieldValue('c-notes', c.notes || '');
   setFieldValue('c-reminder-enabled', !!c.reminderEnabled && c.reminderStatus !== 'completed');
-  updateClientFields(c.dynFields?.['prop-type'] || '');
+  updateClientFields(c.dynFields?.['prop-type'] || '', false);
   Object.entries(c.dynFields || {}).forEach(([key, value]) => setFieldValue(`c-${key}`, value));
   const heading = document.querySelector('#client-modal .modal-title');
   if(heading) heading.textContent = '✏️ ویرایش مشتری';
@@ -4589,10 +4600,13 @@ function openEditClient(id){
 async function saveClient(){
   const name = document.getElementById('c-name').value.trim();
   if(!name){ notify('نام مشتری را وارد کنید','var(--red)'); return; }
-  const dynFields = {};
+  const dynFields = Object.fromEntries(Object.entries(clientDynamicFieldCache).map(([id,value]) => [id.replace(/^c-/, ''),value]));
   document.querySelectorAll('#c-dynamic-fields input, #c-dynamic-fields select, #c-dynamic-fields textarea').forEach(el => {
     if(el.id) dynFields[el.id.replace(/^c-/, '')] = el.value;
   });
+  if(dynFields['prop-type'] === 'زمین') {
+    ['rooms-min','floor-pref','parking-need','elevator','storage','max-year','partner-floors','pets'].forEach(key => delete dynFields[key]);
+  }
   const existing = editingClientId ? state.clients.find(item => sameId(item.id, editingClientId)) : null;
   const isEditing = !!existing;
   const ownerUid = existing?._uid || existing?.userId || currentUser.id;
