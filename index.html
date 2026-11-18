@@ -912,6 +912,8 @@ function profileRef(id){
   #properties-table td,#clients-table td,#deals-table td,#tg-posts-list td,#price-history-list td,#accounting-list td,#report-advisors-table td,#admin-pending-list td,#admin-users-list td{display:flex!important;align-items:flex-start;justify-content:space-between;gap:10px;width:100%!important;min-width:0!important;padding:9px 11px!important;border:none!important;border-bottom:1px solid rgba(48,54,61,.6)!important;font-size:12px!important;line-height:1.65;overflow-wrap:anywhere}
   #properties-table td:last-child,#clients-table td:last-child,#deals-table td:last-child,#tg-posts-list td:last-child,#price-history-list td:last-child,#accounting-list td:last-child,#report-advisors-table td:last-child,#admin-pending-list td:last-child,#admin-users-list td:last-child{border-bottom:none!important}
   #properties-table td:before,#clients-table td:before,#deals-table td:before,#tg-posts-list td:before,#price-history-list td:before,#accounting-list td:before,#report-advisors-table td:before,#admin-pending-list td:before,#admin-users-list td:before{content:attr(data-label);flex:0 0 31%;color:var(--text3);font-size:10px;font-weight:600;line-height:1.7}
+  #properties-table td:nth-child(2){display:block!important}
+  #properties-table td:nth-child(2):before{display:block!important;flex:none!important;margin-bottom:4px}
   #properties-table td:has(button),#clients-table td:has(button),#deals-table td:has(button),#tg-posts-list td:has(button),#admin-pending-list td:has(button),#admin-users-list td:has(button){justify-content:flex-start!important;flex-wrap:wrap;gap:6px!important}
   #properties-table td:has(button):before,#clients-table td:has(button):before,#deals-table td:has(button):before,#tg-posts-list td:has(button):before,#admin-pending-list td:has(button):before,#admin-users-list td:has(button):before{display:none}
   #properties-table td:first-child{justify-content:flex-start;background:rgba(0,0,0,.08)}#properties-table td:first-child:before{display:none}
@@ -5211,13 +5213,13 @@ function renderProperties(){
       notes: p.notes||'', ownerPhone: p.ownerPhone||''
     };
     return `<tr data-property-id="${escapeHTML(String(p.id))}" style="cursor:pointer;" title="برای مشاهده جزئیات کلیک کنید">
-    <td style="width:52px;">
+    <td data-label="تصویر" style="width:52px;">
       ${(p.images&&p.images.length)
         ? `<img src="${safeURL(firstImageSource)}" alt="تصویر ملک" style="width:46px;height:46px;object-fit:cover;border-radius:6px;cursor:pointer;border:1px solid var(--border);" data-property-id="${escapeHTML(String(p.id))}" onclick="openGallery(this.dataset.propertyId)">`
         : `<div style="width:46px;height:46px;background:var(--surface3);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--text3);">🏠</div>`
       }
     </td>
-    <td>
+    <td data-label="عنوان و مشخصات">
       <b>${escapeHTML(p.title)}</b>
       ${p.address ? `<br><span style="font-size:10px;color:var(--text3);">📍 ${escapeHTML(p.address)}</span>` : ''}
       ${(p.images&&p.images.length)||(p.videos&&p.videos.length) ? `<br><span style="font-size:10px;color:var(--text3);">
@@ -5229,11 +5231,11 @@ function renderProperties(){
       ${missingCompletionLabels.length?`<br><span style="font-size:10px;color:var(--text3);">نیازمند: ${escapeHTML(missingCompletionLabels.join('، '))}</span>`:''}
       <br><span class="badge" style="${freshnessStyle}font-size:10px;" title="تأیید مجدد پس از ${toPersianDigits(String(PROPERTY_RECONFIRM_DAYS))} روز">${freshnessLabel}${freshnessAge}</span>
     </td>
-    <td>${escapeHTML(p.type)}</td>
-    <td>${p.extra&&p.extra.area?escapeHTML(p.extra.area)+' م²':(p.extra&&p.extra.land?escapeHTML(p.extra.land)+' م²':'—')}</td>
-    <td style="color:var(--accent)">${propertyPriceHTML(p)}</td>
-    <td>${statusMap[p.status]||p.status}</td>
-    <td>
+    <td data-label="نوع ملک">${escapeHTML(p.type)}</td>
+    <td data-label="متراژ">${p.extra&&p.extra.area?escapeHTML(p.extra.area)+' م²':(p.extra&&p.extra.land?escapeHTML(p.extra.land)+' م²':'—')}</td>
+    <td data-label="قیمت" style="color:var(--accent)">${propertyPriceHTML(p)}</td>
+    <td data-label="وضعیت ملک">${statusMap[p.status]||p.status}</td>
+    <td data-label="تأیید">
       ${approvalMap[approval]||approval}
       ${isAdmin && approval==='pending' ? `
         <div style="display:flex;gap:4px;margin-top:4px;">
@@ -5245,9 +5247,9 @@ function renderProperties(){
           <button class="btn btn-sm" style="background:var(--surface3);color:var(--text2);font-size:10px;padding:3px 8px;" data-property-id="${escapeHTML(String(p.id))}" onclick="setApproval(this.dataset.propertyId,'pending')">↩ برگردان به انتظار</button>
         </div>` : ''}
     </td>
-    <td>${escapeHTML(p.ownerName||'—')}</td>
-    <td><a href="tel:${safePhone(p.ownerPhone)}" style="color:var(--blue)">${escapeHTML(p.ownerPhone||'—')}</a></td>
-    <td style="display:flex;gap:6px;align-items:center;">
+    <td data-label="مالک">${escapeHTML(p.ownerName||'—')}</td>
+    <td data-label="تماس"><a href="tel:${safePhone(p.ownerPhone)}" style="color:var(--blue)">${escapeHTML(p.ownerPhone||'—')}</a></td>
+    <td data-label="عملیات" style="display:flex;gap:6px;align-items:center;">
       <button class="btn btn-primary btn-sm" data-property-id="${escapeHTML(String(p.id))}" onclick="openPropertyDetails(this.dataset.propertyId)" title="مشاهده اطلاعات کامل فایل">🔎 جزئیات</button>
       <button class="btn btn-ghost btn-sm" data-property-id="${escapeHTML(String(p.id))}" onclick="openEditProperty(this.dataset.propertyId)" title="ویرایش ملک">✏️ ویرایش</button>
       ${(p.images&&p.images.length)||(p.videos&&p.videos.length)
@@ -5258,7 +5260,7 @@ function renderProperties(){
         : `<button class="btn btn-ghost btn-sm" disabled title="فایل تایید شده - قابل حذف توسط مشاور نیست" style="opacity:.4;cursor:not-allowed;">🔒</button>`
       }
     </td>
-    <td style="display:flex;flex-direction:column;gap:4px;min-width:120px;">
+    <td data-label="آگهی" style="display:flex;flex-direction:column;gap:4px;min-width:120px;">
       ${approval==='approved' ? `
         <button class="btn btn-sm" data-property-id="${escapeHTML(String(p.id))}" style="background:#00ab6b;color:#fff;font-size:11px;padding:5px 8px;display:flex;align-items:center;gap:4px;justify-content:center;" onclick="postToDivarById(this.dataset.propertyId)">
           🟢 دیوار
