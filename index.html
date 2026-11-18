@@ -4122,9 +4122,16 @@ function openPropertyDetails(id){
   const images = (p.images || []).map(img => typeof img === 'string' ? {src:img,name:''} : {src:img.url || img.data,name:img.name || ''}).filter(img => img.src);
   const extraEntries = Object.entries(p.extra || {}).filter(([,value]) => value !== null && value !== undefined && String(value) !== '');
   const completeness=getPropertyCompleteness(p);
+  const freshness=getPropertyFreshness(p);
+  const freshnessColor=freshness.inactive?'var(--text3)':freshness.needsConfirmation?'#f87171':'#4ade80';
+  const freshnessLabel=freshness.inactive?'بسته / نیازمند تأیید نیست':freshness.needsConfirmation?'نیاز به تأیید مجدد':'معتبر';
+  const freshnessDetail=freshness.inactive?'این فایل در وضعیت بسته‌شده است و نیاز به تأیید ندارد.':freshness.unknown?'تاریخ ثبت یا آخرین تأیید معتبر در دسترس نیست.':`آخرین تأیید: ${toPersianDigits(freshness.lastVerifiedDate)} · ${toPersianDigits(String(freshness.ageDays))} روز پیش`;
+  const canConfirmFreshness=!freshness.inactive&&!!currentUser&&(isAdmin()||currentUser.role==='advisor');
+  const freshnessButton=canConfirmFreshness?`<button class="btn btn-ghost btn-sm" data-property-id="${escapeHTML(String(p.id))}" onclick="confirmPropertyFreshness(this.dataset.propertyId)">${freshness.needsConfirmation?'✓ تأیید مجدد فایل':'✓ تأیید اطلاعات فعلی'}</button>`:'';
+  const freshnessSection=`<div class="property-detail-section"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><div class="property-detail-section-title" style="margin:0;">🗓 اعتبار فایل</div><strong style="color:${freshnessColor};">${freshnessLabel}</strong></div><div style="font-size:11px;color:var(--text2);margin-top:8px;">${freshnessDetail}</div>${!freshness.inactive?`<div style="font-size:10px;color:var(--text3);margin-top:4px;">یادآوری پس از ${toPersianDigits(String(freshness.thresholdDays))} روز از ثبت یا آخرین تأیید.</div>`:''}${freshnessButton?`<div style="margin-top:10px;">${freshnessButton}</div>`:''}</div>`;
   const completionColor=completeness.score===100?'#22c55e':'#eab308';
   const completionRows=completeness.checks.map(check=>`<div style="display:flex;align-items:flex-start;gap:9px;padding:8px 0;border-bottom:1px solid var(--border);"><span style="font-weight:800;color:${check.complete?'#4ade80':'#fbbf24'};">${check.complete?'✓':'!'}</span><div><strong style="font-size:12px;">${escapeHTML(check.label)}</strong><div style="font-size:11px;color:var(--text2);margin-top:2px;">${check.complete?'ثبت شده':escapeHTML(check.detail)}</div></div></div>`).join('');
-  const completenessSection=`<div class="property-detail-section"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><div class="property-detail-section-title" style="margin:0;">📊 تکمیل اطلاعات فایل</div><strong style="color:${completionColor};">${completeness.score}%</strong></div><div role="progressbar" aria-label="درصد تکمیل فایل" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${completeness.score}" style="height:8px;border-radius:99px;background:var(--surface3);overflow:hidden;margin-bottom:8px;"><div style="height:100%;width:${completeness.score}%;background:${completionColor};transition:width .2s;"></div></div><div>${completionRows}</div><small style="display:block;color:var(--text3);margin-top:8px;">هر یک از ۴ معیار عکس، متراژ، مختصات و اطلاعات مالک ۲۵٪ امتیاز دارد.</small></div>`;
+  const completenessSection=`<div class="property-detail-section"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><div class="property-detail-section-title" style="margin:0;">📊 تکمیل اطلاعات فایل</div><strong style="color:${completionColor};">${completeness.score}%</strong></div><div role="progressbar" aria-label="درصد تکمیل فایل" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${completeness.score}" style="height:8px;border-radius:99px;background:var(--surface3);overflow:hidden;margin-bottom:8px;"><div style="height:100%;width:${completeness.score}%;background:${completionColor};transition:width .2s;"></div></div><div>${completionRows}</div><small style="display:block;color:var(--text3);margin-top:8px;">امتیاز از ۳ معیار هم‌وزن محاسبه می‌شود: عکس، متراژ و اطلاعات مالک.</small></div>`;
 
   const core = [
     propertyDetailCard('نوع ملک', propertyDetailValue(p.type)),
@@ -4150,6 +4157,7 @@ function openPropertyDetails(id){
   document.getElementById('property-details-title').textContent = `🔎 جزئیات — ${title}`;
   document.getElementById('property-details-content').innerHTML = `
     <div class="property-detail-hero"><div><div class="property-detail-main-title">${escapeHTML(title)}</div><div class="property-detail-subtitle">${escapeHTML(status)}${p.type ? ` · ${escapeHTML(p.type)}` : ''}</div></div><span class="badge ${approval === 'تایید شده' ? 'badge-green' : approval === 'رد شده' ? 'badge-gray' : 'badge-gold'}">${escapeHTML(approval)}</span></div>
+    ${freshnessSection}
     ${completenessSection}
     <div class="property-detail-section"><div class="property-detail-section-title">📋 اطلاعات اصلی</div><div class="property-detail-grid">${core || '<div class="property-detail-empty">اطلاعات اصلی ثبت نشده است</div>'}</div></div>
     ${extra ? `<div class="property-detail-section"><div class="property-detail-section-title">⚙️ مشخصات تکمیلی</div><div class="property-detail-grid">${extra}</div></div>` : ''}
@@ -4580,16 +4588,6 @@ function getPropertyCompleteness(p){
   const images=Array.isArray(p.images)?p.images:[];
   const hasPhoto=images.some(image=>typeof image==='string'?image.trim().length>0:!!(image&&(image.url||image.data||image.path)));
   const hasArea=getPropArea(p)>0;
-  const coordinateIsValid=(value,min,max)=>{
-    if(value===null||value===undefined||String(value).trim()==='') return false;
-    const normalized=normalizeDigits(String(value).trim()).replace(/[٫]/g,'.');
-    if(!/^-?\d+(?:\.\d+)?$/.test(normalized)) return false;
-    const number=Number(normalized);
-    return Number.isFinite(number)&&number>=min&&number<=max;
-  };
-  const lat=p.lat??extra['p-lat'];
-  const lng=p.lng??extra['p-lng'];
-  const hasCoordinates=coordinateIsValid(lat,-90,90)&&coordinateIsValid(lng,-180,180);
   const ownerName=String(p.ownerName||extra['p-owner-name']||'').trim();
   const ownerPhone=String(p.ownerPhone||extra['p-owner-phone']||'').trim();
   const missingOwner=[];
@@ -4598,11 +4596,42 @@ function getPropertyCompleteness(p){
   const checks=[
     {key:'photo',label:'عکس ملک',complete:hasPhoto,detail:'حداقل یک عکس ملک اضافه کنید.'},
     {key:'area',label:'متراژ',complete:hasArea,detail:'متراژ معتبر وارد نشده است.'},
-    {key:'coordinates',label:'مختصات نقشه',complete:hasCoordinates,detail:'عرض و طول جغرافیایی معتبر ثبت نشده‌اند.'},
     {key:'owner',label:'اطلاعات مالک',complete:!!ownerName&&!!ownerPhone,detail:missingOwner.length?`ثبت نشده: ${missingOwner.join(' و ')}`:''}
   ];
   const completed=checks.filter(check=>check.complete).length;
   return {checks,completed,total:checks.length,score:Math.round(completed*100/checks.length)};
+}
+
+const PROPERTY_RECONFIRM_DAYS=10;
+const INACTIVE_PROPERTY_STATUSES=new Set(['sold','rented','done']);
+
+function propertyCalendarDateInfo(value){
+  if(value===null||value===undefined||value==='') return null;
+  let raw=value;
+  if(raw&&typeof raw.toDate==='function') raw=raw.toDate();
+  if(typeof raw==='number') raw=new Date(raw);
+  if(raw instanceof Date){
+    if(Number.isNaN(raw.getTime())) return null;
+    raw=`${raw.getFullYear()}-${String(raw.getMonth()+1).padStart(2,'0')}-${String(raw.getDate()).padStart(2,'0')}`;
+  }
+  const normalized=normalizeSiteDate(raw);
+  const match=normalized.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if(!match) return null;
+  const year=Number(match[1]), month=Number(match[2]), day=Number(match[3]);
+  if(month<1||month>12||day<1||day>jalaliMonthDays(year,month)) return null;
+  const gregorian=jalaliToGregorian(year,month,day);
+  return {normalized,dayNumber:Math.floor(Date.UTC(gregorian.year,gregorian.month-1,gregorian.day)/86400000)};
+}
+
+function getPropertyFreshness(p,todayValue=siteToday()){
+  p=p||{};
+  const inactive=INACTIVE_PROPERTY_STATUSES.has(p.status);
+  const today=propertyCalendarDateInfo(todayValue);
+  const lastVerified=[p.lastVerifiedAt,p.date,p.createdAt].map(propertyCalendarDateInfo).find(Boolean)||null;
+  const ageDays=today&&lastVerified?Math.max(0,today.dayNumber-lastVerified.dayNumber):null;
+  const unknown=!today||!lastVerified;
+  const needsConfirmation=!inactive&&(unknown||ageDays>=PROPERTY_RECONFIRM_DAYS);
+  return {inactive,unknown,needsConfirmation,ageDays,lastVerifiedDate:lastVerified?.normalized||'',thresholdDays:PROPERTY_RECONFIRM_DAYS};
 }
 
 function renderProperties(){
@@ -4670,6 +4699,10 @@ function renderProperties(){
   ${list.map(p=>{
     const approval = p.approvalStatus || 'pending';
     const completeness=getPropertyCompleteness(p);
+    const freshness=getPropertyFreshness(p);
+    const freshnessStyle=freshness.inactive?'background:var(--surface3);color:var(--text3);':freshness.needsConfirmation?'background:#4a0b0b;color:#f87171;':'background:#0b4a2e;color:#4ade80;';
+    const freshnessLabel=freshness.inactive?'⏸ بسته':freshness.needsConfirmation?'⚠ نیاز به تأیید مجدد':'✓ معتبر';
+    const freshnessAge=freshness.inactive?'':freshness.unknown?' · تاریخ نامشخص':` · ${toPersianDigits(String(freshness.ageDays))} روز از آخرین تأیید`;
     const missingCompletionLabels=completeness.checks.filter(check=>!check.complete).map(check=>check.label);
     const completionStyle=completeness.score===100?'background:#0b4a2e;color:#4ade80;':'background:#5a4509;color:#ffd166;';
     // قفل حذف: مشاور نمی‌تواند فایل تایید شده را حذف کند
@@ -4699,6 +4732,7 @@ function renderProperties(){
       ${p.userName ? `<br><span style="font-size:10px;color:var(--text3);">👤 ${escapeHTML(p.userName)}</span>` : ''}
       <br><span class="badge" style="${completionStyle}font-size:10px;">${completeness.score===100?'✓ کامل':'⚠ ناقص'} ${completeness.score}% (${completeness.completed}/${completeness.total})</span>
       ${missingCompletionLabels.length?`<br><span style="font-size:10px;color:var(--text3);">نیازمند: ${escapeHTML(missingCompletionLabels.join('، '))}</span>`:''}
+      <br><span class="badge" style="${freshnessStyle}font-size:10px;" title="تأیید مجدد پس از ${toPersianDigits(String(PROPERTY_RECONFIRM_DAYS))} روز">${freshnessLabel}${freshnessAge}</span>
     </td>
     <td>${escapeHTML(p.type)}</td>
     <td>${p.extra&&p.extra.area?escapeHTML(p.extra.area)+' م²':(p.extra&&p.extra.land?escapeHTML(p.extra.land)+' م²':'—')}</td>
@@ -4776,6 +4810,29 @@ async function setApproval(id, newStatus){
     const msgMap = {approved:'ملک تایید شد ✅', pending:'به حالت در انتظار برگشت', rejected:'ملک رد شد'};
     notify(msgMap[newStatus] || 'بروزرسانی شد');
   } catch(e){ notify('خطا در بروزرسانی: '+e.message, 'var(--red)'); }
+}
+
+async function confirmPropertyFreshness(id){
+  if(!currentUser||!['admin','advisor'].includes(currentUser.role)) return;
+  const prop=state.properties.find(item=>sameId(item.id,id));
+  if(!prop) return;
+  if(INACTIVE_PROPERTY_STATUSES.has(prop.status)){
+    notify('فایل بسته‌شده نیازی به تأیید مجدد ندارد');
+    return;
+  }
+  const ownerUid=prop._uid||prop.userId||(currentUser.role==='advisor'?currentUser.id:'');
+  if(!ownerUid||(!isAdmin()&&String(ownerUid)!==String(currentUser.id))){
+    notify('اجازهٔ تأیید این فایل را ندارید','var(--red)');
+    return;
+  }
+  try {
+    const lastVerifiedAt=siteToday();
+    await withTimeout(backend().updateDoc(backend().doc(backend().db,`users/${ownerUid}/properties/${prop.id}`),{lastVerifiedAt}),12000,'ذخیرهٔ تأیید فایل بیش از ۱۲ ثانیه طول کشید');
+    prop.lastVerifiedAt=lastVerifiedAt;
+    renderProperties();
+    openPropertyDetails(prop.id);
+    notify(`اعتبار فایل تأیید شد؛ یادآوری بعدی ${toPersianDigits(String(PROPERTY_RECONFIRM_DAYS))} روز دیگر است ✅`);
+  } catch(e){ notify('خطا در تأیید اعتبار فایل: '+e.message,'var(--red)'); }
 }
 
 function propertyPriceHTML(p){
