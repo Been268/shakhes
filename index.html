@@ -2058,6 +2058,8 @@ function profileRef(id){
         </div>
         <input type="file" id="p-images-input" accept="image/*" multiple style="display:none" onchange="handleImgSelect(event)">
         <div id="img-preview-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px;"></div>
+        <div style="font-size:10px;color:var(--text3);margin-top:6px;">بررسی شباهت در مرورگر انجام می‌شود؛ هیچ تصویری خودکار حذف نمی‌شود.</div>
+        <div id="img-duplicate-warning" role="status" aria-live="polite" style="font-size:11px;margin-top:6px;"></div>
       </div>
 
       <!-- لینک ویدیو -->
@@ -3149,6 +3151,8 @@ function openNewPropertyModal(){
   openModal('prop-modal');
 }
 function resetPropertyForm(){
+  propertyImageReadGeneration++;
+  clearPropertyDuplicatePhotoState();
   editingPropertyId = null;
   editingImagesDirty = false;
   propertyTitleTouched = false;
@@ -3163,10 +3167,7 @@ function resetPropertyForm(){
     if(el.type === 'checkbox') el.checked = false;
     else el.value = '';
   });
-  currentImages = [];
-  currentVideos = [];
-  if(typeof renderImgPreview === 'function') renderImgPreview();
-  if(typeof renderVideoLinks === 'function') renderVideoLinks();
+  resetMediaInputs();
   backToPropStep1();
   const heading = document.querySelector('#prop-modal .modal-title');
   if(heading) heading.textContent = '🏠 ثبت ملک جدید';
@@ -3255,9 +3256,22 @@ function openModal(id){
   modal.setAttribute('aria-hidden', 'false');
   refreshMoneyWordInputs(modal);
 }
-function closeModal(id){
+function closeModal(id, force=false){
   const modal = document.getElementById(id);
   if(!modal) return;
+  if(id==='prop-modal'&&propertySaveInProgress&&!force){
+    notify('بررسی و ذخیره در حال انجام است؛ پس از پایان دوباره تلاش کنید','var(--accent)');
+    const status=document.getElementById('img-duplicate-warning');
+    if(status&&!status.querySelector('[data-save-lock-note]')){
+      const note=document.createElement('div');
+      note.dataset.saveLockNote='true';
+      note.setAttribute('role','alert');
+      note.style.color='var(--accent)';
+      note.textContent='بررسی یا ذخیره در حال انجام است؛ لطفاً تا پایان کار صبر کنید.';
+      status.appendChild(note);
+    }
+    return;
+  }
   modal.classList.remove('open');
   modal.style.display = 'none';
   modal.setAttribute('aria-hidden', 'true');
@@ -3918,8 +3932,60 @@ document.addEventListener('input', event=>{
 // --- MEDIA (images + video) ---
 let currentImages = []; // [{data: base64, name: str}]
 let currentVideos = []; // [url string]
+let propertyDuplicateHashCache = new Map();
+let propertyDuplicateScanVersion = 0;
+let propertyDuplicateWarnings = [];
+let propertyDuplicateUnscannable = 0;
+let propertyDuplicateComparisonTimedOut = false;
+const PROPERTY_PHOTO_HASH_DISTANCE = 2;
+const PROPERTY_PHOTO_SCAN_BUDGET_MS = 25000;
+let propertyImageReadGeneration = 0;
+let pendingPropertyImageReads = 0;
+let propertyImageReadWaiters = [];
+let propertyImageReadFailures = [];
+let propertyImageSelectionBatchSequence = 0;
+let propertySaveInProgress = false;
 let lightboxImages = [];
 let lightboxIndex = 0;
+
+function settlePropertyImageRead(){
+  pendingPropertyImageReads=Math.max(0,pendingPropertyImageReads-1);
+  if(pendingPropertyImageReads===0){
+    const waiters=propertyImageReadWaiters.splice(0);
+    waiters.forEach(resolve=>resolve());
+  }
+}
+
+function waitForPendingPropertyImageReads(){
+  if(!pendingPropertyImageReads) return Promise.resolve();
+  return new Promise(resolve=>propertyImageReadWaiters.push(resolve));
+}
+
+function showPropertyPhotoDuplicateHint(){
+  const box=document.getElementById('img-duplicate-warning');
+  if(!box) return;
+  if(propertyImageReadFailures.length){
+    const errors=propertyImageReadFailures.slice(0,3).map(item=>`<div role="alert" style="color:var(--red);">${escapeHTML(item.message)}</div>`).join('');
+    const more=propertyImageReadFailures.length>3?`<div style="color:var(--text3);">و ${toPersianDigits(String(propertyImageReadFailures.length-3))} خطای دیگر</div>`:'';
+    box.innerHTML=errors+more;
+    return;
+  }
+  if(currentImages.some(image=>image?._duplicateCheck)) box.innerHTML='<div style="color:var(--text3);">هنگام ذخیره، عکس‌های تازه با تصاویر فایل‌های دیگر مقایسه می‌شوند.</div>';
+}
+
+function propertyImageFileKey(file){
+  return JSON.stringify([String(file?.name||''),Number(file?.size)||0,Number(file?.lastModified)||0]);
+}
+
+function reportPropertyPhotoReadFailure(message,file,readId,batchId){
+  const key=propertyImageFileKey(file);
+  const failure={key,readId,batchId,message:String(message)};
+  const existing=propertyImageReadFailures.findIndex(item=>item.readId===readId);
+  if(existing>=0) propertyImageReadFailures[existing]=failure;
+  else propertyImageReadFailures.push(failure);
+  showPropertyPhotoDuplicateHint();
+  notify(message,'var(--red)');
+}
 
 function handleImgSelect(e){
   const files = Array.from(e.target.files);
@@ -3935,17 +4001,45 @@ function handleImgDrop(e){
 }
 
 function loadImageFiles(files){
-  const remaining = 10 - currentImages.length;
+  if(propertySaveInProgress){ notify('بررسی یا ذخیرهٔ عکس‌ها در حال انجام است','var(--accent)'); return; }
+  const remaining = 10 - currentImages.length - pendingPropertyImageReads;
   if(remaining <= 0){ notify('حداکثر ۱۰ تصویر مجاز است','var(--red)'); return; }
   const toLoad = files.slice(0, remaining);
-  toLoad.forEach(file => {
+  const readGeneration=propertyImageReadGeneration;
+  const selectionBatch=++propertyImageSelectionBatchSequence;
+  toLoad.forEach((file,fileIndex) => {
+    const batchId=selectionBatch;
+    const readId=`${selectionBatch}:${fileIndex}`;
     editingImagesDirty = true;
+    pendingPropertyImageReads++;
     const reader = new FileReader();
+    let settled=false,timedOut=false,readTimeout=null;
+    const settle=()=>{ if(settled) return; settled=true; if(readTimeout!==null) clearTimeout(readTimeout); settlePropertyImageRead(); };
+    readTimeout=setTimeout(()=>{
+      if(settled) return;
+      timedOut=true;
+      if(readGeneration===propertyImageReadGeneration) reportPropertyPhotoReadFailure(`خواندن تصویر «${file.name}» بیش از ۳۰ ثانیه طول کشید؛ دوباره انتخاب کنید.`,file,readId,batchId);
+      try { reader.abort(); } catch(error) {}
+      settle();
+    },30000);
     reader.onload = e => {
-      currentImages.push({ data: e.target.result, name: file.name });
-      renderImgPreview();
+      if(settled) return;
+      try {
+        if(readGeneration===propertyImageReadGeneration){
+          const fileKey=propertyImageFileKey(file);
+          const priorFailureIndex=propertyImageReadFailures.findIndex(item=>item.key===fileKey&&item.batchId!==batchId);
+          if(priorFailureIndex>=0) propertyImageReadFailures.splice(priorFailureIndex,1);
+          currentImages.push({ data: e.target.result, name: file.name, _duplicateCheck: true });
+          renderImgPreview();
+          clearPropertyDuplicatePhotoState();
+          showPropertyPhotoDuplicateHint();
+        }
+      } finally { settle(); }
     };
-    reader.readAsDataURL(file);
+    reader.onerror = () => { if(settled) return; if(readGeneration===propertyImageReadGeneration&&!timedOut) reportPropertyPhotoReadFailure(`خواندن تصویر «${file.name}» ممکن نشد؛ دوباره انتخاب کنید.`,file,readId,batchId); settle(); };
+    reader.onabort = () => { if(settled) return; if(readGeneration===propertyImageReadGeneration&&!timedOut) reportPropertyPhotoReadFailure(`خواندن تصویر «${file.name}» متوقف شد؛ دوباره انتخاب کنید.`,file,readId,batchId); settle(); };
+    try { reader.readAsDataURL(file); }
+    catch(error){ if(!settled&&readGeneration===propertyImageReadGeneration) reportPropertyPhotoReadFailure(`خواندن تصویر «${file.name}» ممکن نشد؛ دوباره انتخاب کنید.`,file,readId,batchId); settle(); }
   });
 }
 
@@ -3962,9 +4056,185 @@ function renderImgPreview(){
 }
 
 function removeCurrentImg(i){
+  if(propertySaveInProgress) return;
   editingImagesDirty = true;
+  const removed=currentImages[i];
+  if(removed?._duplicateCheck&&removed.data) propertyDuplicateHashCache.delete(removed.data);
   currentImages.splice(i, 1);
   renderImgPreview();
+  clearPropertyDuplicatePhotoState();
+  showPropertyPhotoDuplicateHint();
+}
+
+function clearPropertyDuplicatePhotoState(){
+  propertyDuplicateScanVersion++;
+  propertyDuplicateWarnings=[];
+  propertyDuplicateUnscannable=0;
+  propertyDuplicateComparisonTimedOut=false;
+  for(const image of currentImages){
+    if(image?._duplicateCheck&&image.data) propertyDuplicateHashCache.delete(image.data);
+  }
+  const box=document.getElementById('img-duplicate-warning');
+  if(box) box.innerHTML='';
+}
+
+function propertyPhotoSource(image){
+  if(typeof image==='string') return image;
+  return String(image?.data||image?.url||'');
+}
+
+function differenceHashFromPixels(pixels){
+  const width=9, height=8, gray=[];
+  for(let i=0;i<width*height*4;i+=4){
+    const alpha=(pixels[i+3]??255)/255;
+    const luminance=0.299*pixels[i]+0.587*pixels[i+1]+0.114*pixels[i+2];
+    gray.push(luminance*alpha+255*(1-alpha));
+  }
+  if(Math.max(...gray)-Math.min(...gray)<8) return null;
+  let bits='';
+  for(let y=0;y<height;y++){
+    for(let x=0;x<width-1;x++) bits+=gray[y*width+x]>gray[y*width+x+1]?'1':'0';
+  }
+  return bits;
+}
+
+function propertyPhotoHash(source){
+  source=String(source||'');
+  if(!source) return Promise.resolve(null);
+  if(propertyDuplicateHashCache.has(source)) return propertyDuplicateHashCache.get(source);
+  const promise=new Promise(resolve=>{
+    const image=new Image();
+    let settled=false;
+    const finish=value=>{
+      if(settled) return;
+      settled=true;
+      clearTimeout(timer);
+      if(value===null) image.src='data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
+      resolve(value);
+    };
+    const timer=setTimeout(()=>finish(null),8000);
+    if(!source.startsWith('data:')&&!source.startsWith('blob:')) image.crossOrigin='anonymous';
+    image.onload=()=>{
+      try {
+        const canvas=document.createElement('canvas');
+        canvas.width=9; canvas.height=8;
+        const context=canvas.getContext('2d',{willReadFrequently:true});
+        if(!context){ finish(null); return; }
+        context.fillStyle='#fff';
+        context.fillRect(0,0,9,8);
+        context.drawImage(image,0,0,9,8);
+        finish(differenceHashFromPixels(context.getImageData(0,0,9,8).data));
+      } catch(error){ finish(null); }
+    };
+    image.onerror=()=>finish(null);
+    image.src=source;
+  }).then(hash=>{
+    if(!hash) propertyDuplicateHashCache.delete(source);
+    return hash;
+  },()=>{
+    propertyDuplicateHashCache.delete(source);
+    return null;
+  });
+  propertyDuplicateHashCache.set(source,promise);
+  return promise;
+}
+
+function photoHashDistance(a,b){
+  if(!a||!b||a.length!==64||b.length!==64) return 64;
+  let distance=0;
+  for(let i=0;i<64;i++) if(a[i]!==b[i]) distance++;
+  return distance;
+}
+
+async function hashPhotosWithLimit(items,worker,limit=3,onProgress=()=>{},deadline=Infinity){
+  const results=new Array(items.length).fill(null);
+  let cursor=0,completed=0;
+  const count=Math.min(limit,items.length);
+  await Promise.all(Array.from({length:count},async()=>{
+    while(true){
+      if(Date.now()>=deadline) return;
+      const index=cursor++;
+      if(index>=items.length) return;
+      try { results[index]=await worker(items[index],index); }
+      catch(error){ results[index]=null; }
+      completed++;
+      onProgress(completed,items.length);
+    }
+  }));
+  return results;
+}
+
+async function checkPropertyPhotoDuplicates(){
+  const version=++propertyDuplicateScanVersion;
+  const deadline=Date.now()+PROPERTY_PHOTO_SCAN_BUDGET_MS;
+  const box=document.getElementById('img-duplicate-warning');
+  const candidates=currentImages.map((image,index)=>({...image,index})).filter(image=>image._duplicateCheck&&propertyPhotoSource(image));
+  propertyDuplicateWarnings=[];
+  propertyDuplicateUnscannable=0;
+  propertyDuplicateComparisonTimedOut=false;
+  if(!candidates.length){ if(box) box.innerHTML=''; return []; }
+
+  const references=[];
+  for(const property of state.properties||[]){
+    if(editingPropertyId&&sameId(property.id,editingPropertyId)) continue;
+    for(const image of property.images||[]){
+      const source=propertyPhotoSource(image);
+      if(source) references.push({source,propertyId:String(property.id??''),title:property.title||'ملک بدون عنوان'});
+    }
+  }
+  if(!references.length){
+    if(box) box.innerHTML='<div style="color:var(--text3);">فایل دیگری با تصویر قابل‌مقایسه پیدا نشد.</div>';
+    return [];
+  }
+
+  if(box) box.innerHTML=`<div style="color:var(--text2);">در حال بررسی ${toPersianDigits(String(candidates.length))} تصویر جدید در برابر ${toPersianDigits(String(references.length))} تصویر فایل‌های دیگر…</div>`;
+  const candidateHashes=await hashPhotosWithLimit(candidates,image=>propertyPhotoHash(propertyPhotoSource(image)),3,()=>{},deadline);
+  if(version!==propertyDuplicateScanVersion) return [];
+  const referenceHashes=await hashPhotosWithLimit(references,image=>propertyPhotoHash(image.source),3,(done,total)=>{
+    if(version===propertyDuplicateScanVersion&&box) box.innerHTML=`<div style="color:var(--text2);">در حال مقایسه تصاویر فایل‌ها… ${toPersianDigits(String(done))} از ${toPersianDigits(String(total))}</div>`;
+  },deadline);
+  if(version!==propertyDuplicateScanVersion) return [];
+
+  const candidateFailures=candidateHashes.filter(hash=>!hash).length;
+  const referenceFailures=referenceHashes.filter(hash=>!hash).length;
+  propertyDuplicateUnscannable=candidateFailures+referenceFailures;
+  const warnings=[];
+  const seen=new Set();
+  let comparisons=0;
+  comparisonLoop:
+  for(let i=0;i<candidateHashes.length;i++){
+    if(Date.now()>=deadline){ propertyDuplicateComparisonTimedOut=true; break; }
+    const hash=candidateHashes[i];
+    if(!hash) continue;
+    for(let j=0;j<referenceHashes.length;j++){
+      if((comparisons++%256)===0&&Date.now()>=deadline){ propertyDuplicateComparisonTimedOut=true; break comparisonLoop; }
+      const distance=photoHashDistance(hash,referenceHashes[j]);
+      if(comparisons%10000===0){
+        await new Promise(resolve=>setTimeout(resolve,0));
+        if(version!==propertyDuplicateScanVersion) return [];
+      }
+      if(distance>PROPERTY_PHOTO_HASH_DISTANCE) continue;
+      const key=`${i}:${references[j].propertyId}`;
+      if(seen.has(key)) continue;
+      seen.add(key);
+      warnings.push({imageName:candidates[i].name||`تصویر ${i+1}`,propertyId:references[j].propertyId,propertyTitle:references[j].title,distance});
+    }
+  }
+  propertyDuplicateWarnings=warnings;
+  if(box){
+    const skippedText=propertyDuplicateUnscannable?`<div style="font-size:10px;color:var(--text3);margin-top:5px;">${toPersianDigits(String(propertyDuplicateUnscannable))} تصویر به‌دلیل خطای بارگذاری/دسترسی یا محدودیت زمانی بررسی نشد؛ نتیجه کامل نیست.</div>`:'';
+    const comparisonSkippedText=propertyDuplicateComparisonTimedOut?'<div style="font-size:10px;color:var(--text3);margin-top:5px;">مقایسه به محدودیت زمانی رسید؛ ممکن است همهٔ موارد با هم مقایسه نشده باشند.</div>':'';
+    if(warnings.length){
+      const rows=warnings.slice(0,6).map(item=>`<li>«${escapeHTML(item.imageName)}» شبیه عکس ملک «${escapeHTML(item.propertyTitle)}» است.</li>`).join('');
+      const more=warnings.length>6?`<li>و ${toPersianDigits(String(warnings.length-6))} مورد دیگر</li>`:'';
+      box.innerHTML=`<div style="padding:8px 10px;border:1px solid #8b6500;border-radius:8px;background:#5a45091a;color:#ffd166;">⚠ ${toPersianDigits(String(warnings.length))} مورد احتمالی تکراری یا بسیار مشابه پیدا شد:<ul style="margin:6px 0 0;padding-right:20px;">${rows}${more}</ul><div style="font-size:10px;margin-top:5px;">عکس‌ها حذف نشده‌اند؛ پیش از ذخیره بررسی کنید.</div></div>${skippedText}${comparisonSkippedText}`;
+    } else if(propertyDuplicateUnscannable||propertyDuplicateComparisonTimedOut){
+      box.innerHTML=`<div style="color:var(--accent);">بررسی کامل نشد؛ نتیجه ناقص است و ممکن است تصویر مشابهی جا مانده باشد.</div>${skippedText}${comparisonSkippedText}`;
+    } else {
+      box.innerHTML='<div style="color:var(--green);">تصویر مشابهی در عکس‌های فایل‌های دیگر پیدا نشد.</div>';
+    }
+  }
+  return warnings;
 }
 
 function previewSingleImg(i){
@@ -4002,6 +4272,9 @@ function removeVideo(i){
 }
 
 function resetMediaInputs(){
+  propertyImageReadGeneration++;
+  clearPropertyDuplicatePhotoState();
+  propertyImageReadFailures=[];
   currentImages = [];
   currentVideos = [];
   renderImgPreview();
@@ -4303,6 +4576,7 @@ const withTimeout = (promise, ms, message) => {
 // The conservative cap also prevents very large database requests.
 const INLINE_IMAGE_TOTAL_LIMIT = 700000;
 const INLINE_IMAGE_MAX_DIMENSION = 1280;
+const INLINE_IMAGE_PREPARATION_BUDGET_MS = 25000;
 
 function dataUrlByteSize(dataUrl){
   const base64 = String(dataUrl || '').split(',')[1] || '';
@@ -4313,7 +4587,19 @@ function compressImageDataUrl(dataUrl, name){
   return new Promise(resolve => {
     if(!String(dataUrl || '').startsWith('data:image/')){ resolve(null); return; }
     if(dataUrlByteSize(dataUrl) <= 120000){ resolve({data:dataUrl, name:name || 'تصویر'}); return; }
+    const fallback={data:dataUrl, name:name || 'تصویر'};
+    let settled=false,timer=null;
+    const finish=value=>{
+      if(settled) return;
+      settled=true;
+      if(timer!==null) clearTimeout(timer);
+      resolve(value);
+    };
     const image = new Image();
+    timer=setTimeout(()=>{
+      console.warn('Image compression timed out; retaining original image:',name || 'تصویر');
+      finish(fallback);
+    },8000);
     image.onload = () => {
       try {
         const scale = Math.min(1, INLINE_IMAGE_MAX_DIMENSION / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
@@ -4329,22 +4615,27 @@ function compressImageDataUrl(dataUrl, name){
           compressed = canvas.toDataURL('image/jpeg', quality);
           if(dataUrlByteSize(compressed) <= 180000) break;
         }
-        resolve({data:compressed || dataUrl, name:name || 'تصویر'});
+        finish({data:compressed || dataUrl, name:name || 'تصویر'});
       } catch(error) {
         console.warn('Image compression skipped:', error);
-        resolve({data:dataUrl, name:name || 'تصویر'});
+        finish(fallback);
       }
     };
-    image.onerror = () => resolve({data:dataUrl, name:name || 'تصویر'});
-    image.src = dataUrl;
+    image.onerror = () => finish(fallback);
+    try { image.src = dataUrl; }
+    catch(error){ finish(fallback); }
   });
 }
 
 async function prepareInlineImages(images){
+  const inputImages=Array.from(images || []);
   const savedImages = [];
   let totalBytes = 0;
   let skipped = 0;
-  for(const image of images || []){
+  const deadline=Date.now()+INLINE_IMAGE_PREPARATION_BUDGET_MS;
+  for(let index=0;index<inputImages.length;index++){
+    if(Date.now()>=deadline){ skipped+=inputImages.length-index; break; }
+    const image=inputImages[index];
     // لینک‌های Storage قدیمی را بدون تبدیل مجدد حفظ کن.
     if(image && image.url && !image.data){
       savedImages.push({url:image.url, name:image.name || ''});
@@ -4427,10 +4718,13 @@ function openEditProperty(id){
   setFieldValue('p-notes', p.notes || '');
   Object.entries(p.extra || {}).forEach(([key, value]) => setFieldValue(key, value));
   updatePriceFields();
+  propertyImageReadGeneration++;
+  propertyImageReadFailures=[];
   currentImages = (p.images || []).map(img => {
     if(typeof img === 'string') return String(img).startsWith('data:image/') ? {data:img, name:''} : {url:img, name:''};
     return {data:img.data || '', url:img.url || '', name:img.name || ''};
   }).filter(img => img.data || img.url);
+  clearPropertyDuplicatePhotoState();
   currentVideos = [...(p.videos || [])];
   refreshPropertyTitleSuggestions();
   renderImgPreview();
@@ -4452,9 +4746,33 @@ async function saveProperty(){
   }
 
   const btn = document.querySelector('#prop-modal .btn-primary');
-  if(btn){ btn.disabled=true; btn.textContent='در حال ذخیره...'; }
+  propertySaveInProgress=true;
+  if(btn){ btn.disabled=true; btn.textContent='در حال آماده‌سازی عکس‌ها...'; }
 
   try {
+    await waitForPendingPropertyImageReads();
+    if(propertyImageReadFailures.length){
+      const failedImages=propertyImageReadFailures.slice(0,3).map(item=>`• ${item.message}`).join('\n');
+      const more=propertyImageReadFailures.length>3?`\nو ${toPersianDigits(String(propertyImageReadFailures.length-3))} مورد دیگر`:'';
+      if(!confirm(`${toPersianDigits(String(propertyImageReadFailures.length))} تصویر انتخاب‌شده خوانده نشد:\n${failedImages}${more}\nاگر این عکس‌ها لازم‌اند، «لغو» را بزنید و دوباره انتخاب کنید. ذخیره بدون آن‌ها ادامه یابد؟`)) return;
+    }
+    if(btn) btn.textContent='در حال بررسی عکس‌ها...';
+    const duplicateWarnings=await checkPropertyPhotoDuplicates();
+    if(duplicateWarnings.length){
+      const summary=duplicateWarnings.slice(0,4).map(item=>`• «${String(item.imageName).replace(/\s+/g,' ').slice(0,60)}» ↔ «${String(item.propertyTitle).replace(/\s+/g,' ').slice(0,60)}»`).join('\n');
+      const more=duplicateWarnings.length>4?`\nو ${duplicateWarnings.length-4} مورد دیگر`:'';
+      const incompleteParts=[];
+      if(propertyDuplicateUnscannable) incompleteParts.push(`${toPersianDigits(String(propertyDuplicateUnscannable))} تصویر قابل بررسی نبود`);
+      if(propertyDuplicateComparisonTimedOut) incompleteParts.push('مقایسه به محدودیت زمانی رسید');
+      const incomplete=incompleteParts.length?`\nنتیجه ناقص است: ${incompleteParts.join('؛ ')}`:'';
+      if(!confirm(`احتمال تکراری یا بسیار مشابه بودن عکس‌ها پیدا شد:\n${summary}${more}\nهیچ عکسی خودکار حذف نمی‌شود. آیا با وجود هشدار ذخیره ادامه یابد؟${incomplete}`)) return;
+    } else if(propertyDuplicateUnscannable||propertyDuplicateComparisonTimedOut){
+      const incompleteParts=[];
+      if(propertyDuplicateUnscannable) incompleteParts.push(`${toPersianDigits(String(propertyDuplicateUnscannable))} تصویر قابل بررسی نبود`);
+      if(propertyDuplicateComparisonTimedOut) incompleteParts.push('مقایسه به محدودیت زمانی رسید');
+      if(!confirm(`${incompleteParts.join('؛ ')}. نتیجه کامل نیست و ممکن است تصویر مشابهی جا مانده باشد. ذخیره ادامه یابد؟`)) return;
+    }
+    if(btn) btn.textContent='در حال ذخیره...';
     const status = document.getElementById('p-status').value;
     let priceData = {};
     if(status==='rent'){ priceData={mortgage:rawAmountValue(gVal('p-mortgage')),rent:rawAmountValue(gVal('p-rent'))}; }
@@ -4473,14 +4791,18 @@ async function saveProperty(){
 
     // برای اینکه تصویر روی پلن Spark هم بعد از refresh باقی بماند،
     // قبل از ذخیره به‌صورت فشرده داخل همان سند ملک نگهداری می‌شود.
-    const imagesToUpload = currentImages.slice();
-    const inlineImageResult = await prepareInlineImages(imagesToUpload);
-
     const existing = editingPropertyId ? state.properties.find(item => sameId(item.id, editingPropertyId)) : null;
     const isEditing = !!existing;
     const ownerUid = existing?._uid || existing?.userId || currentUser.id;
     const docId = isEditing ? String(existing.id) : String(Date.now());
     const keepExistingImages = isEditing && !editingImagesDirty;
+    const imagesToUpload = keepExistingImages ? [] : currentImages.slice();
+    const inlineImageResult = await prepareInlineImages(imagesToUpload);
+    const skippedImageCount = keepExistingImages ? 0 : inlineImageResult.skipped;
+    if(skippedImageCount){
+      const skippedText=`${toPersianDigits(String(skippedImageCount))} تصویر به‌دلیل محدودیت حجم یا آماده‌سازی در این ذخیره‌سازی جا نمی‌گیرد و ذخیره نخواهد شد.`;
+      if(!confirm(`${skippedText}\nبرای کم‌کردن تعداد/حجم عکس‌ها «لغو» را بزنید؛ یا ذخیره بدون این تصاویر ادامه یابد؟`)) return;
+    }
     const propData = {
       ...(existing || {}),
       title, type: currentPropType, status,
@@ -4517,7 +4839,6 @@ async function saveProperty(){
       } else state.properties.unshift(propData);
     }
 
-    currentImages = []; currentVideos = [];
     editingPropertyId = null;
     editingImagesDirty = false;
     resetMediaInputs();
@@ -4530,25 +4851,26 @@ async function saveProperty(){
     const pLat = document.getElementById('p-lat'); if(pLat) pLat.value='';
     const pLng = document.getElementById('p-lng'); if(pLng) pLng.value='';
     clearPropertyTextSource();
-    closeModal('prop-modal');
+    closeModal('prop-modal',true);
     backToPropStep1();
     if(isCustomer) renderCustomerMarketplace();
     else { renderProperties(); updateCounts(); }
     if(!isCustomer && document.getElementById('page-price-history')?.classList.contains('active')) renderPriceHistory();
-    const imageNotice = isCustomer
+    const imageNotice = skippedImageCount
+      ? `${isCustomer ? 'فایل' : 'ملک'} ذخیره شد؛ ${toPersianDigits(String(skippedImageCount))} تصویر به‌دلیل محدودیت حجم یا آماده‌سازی کنار گذاشته شد.`
+      : isCustomer
       ? 'فایل شما برای بررسی و تأیید مدیر ارسال شد؛ پس از ویرایش نیز دوباره بررسی می‌شود ✅'
       : isEditing
       ? (priceHistoryRecords.length ? `ملک و ${priceHistoryRecords.length} سابقه تغییر قیمت ذخیره شد ✅` : 'اطلاعات ملک با موفقیت ویرایش شد ✅')
-      : inlineImageResult.skipped
-        ? `ملک ذخیره شد؛ ${inlineImageResult.images.length} تصویر ذخیره شد و ${inlineImageResult.skipped} تصویر به‌دلیل محدودیت حجم کنار گذاشته شد`
-        : inlineImageResult.images.length
+      : inlineImageResult.images.length
           ? 'ملک و تصاویر با موفقیت ذخیره شدند ✅'
           : 'ملک با موفقیت ذخیره شد ✅';
-    notify(imageNotice, inlineImageResult.skipped ? 'var(--accent)' : 'var(--green)');
+    notify(imageNotice, skippedImageCount ? 'var(--accent)' : 'var(--green)');
   } catch(e){
     notify('خطا در ذخیره: ' + e.message, 'var(--red)');
     console.error(e);
   } finally {
+    propertySaveInProgress=false;
     if(btn){ btn.disabled=false; btn.textContent='💾 ذخیره'; }
   }
 }
