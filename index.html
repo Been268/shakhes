@@ -1832,6 +1832,14 @@ function profileRef(id){
       </div>
       <div class="form-grid">
         <div class="form-group full">
+          <label for="p-text-source">پر کردن خودکار از متن آگهی یا پیام</label>
+          <textarea id="p-text-source" rows="4" placeholder="متن آگهی یا پیام را اینجا بچسبانید. استخراج روی همین دستگاه انجام می‌شود و متن اصلی ذخیره یا ارسال نمی‌شود."></textarea>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="parsePropertyText()">🔎 استخراج اطلاعات</button>
+          </div>
+          <div id="p-text-extraction-preview" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);"></div>
+        </div>
+        <div class="form-group full">
           <label>عنوان نمایشی ملک</label>
           <input type="text" id="p-title" placeholder="مثال: آپارتمان ۱۲۰ متری، ۲ خوابه برای فروش" oninput="propertyTitleTouched=true">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:8px;">
@@ -3094,6 +3102,7 @@ async function changeUserRole(userId,role){
 let editingPropertyId = null;
 let propertyTitleTouched = false;
 let propertyTitleMode = 'short';
+let pendingPropertyTextFields = null;
 let editingClientId = null;
 let clientDynamicFieldCache = {};
 let editingAdvisorId = null;
@@ -3134,6 +3143,7 @@ function resetPropertyForm(){
   editingImagesDirty = false;
   propertyTitleTouched = false;
   propertyTitleMode = 'short';
+  clearPropertyTextSource();
   document.querySelectorAll('#prop-step2 input, #prop-step2 select, #prop-step2 textarea').forEach(el => {
     if(el.type === 'checkbox') el.checked = false;
     else el.value = '';
@@ -3598,6 +3608,98 @@ function propertyTitleVariants(){
   const short=[type,size,status].filter(Boolean).join(' | ');
   const long=[type,size,roomText,status].filter(Boolean).join('، ');
   return {short:short||'ملک برای ثبت',long:long||short||'ملک برای ثبت'};
+}
+
+function extractPropertyFieldsFromText(source){
+  const text=normalizeDigits(source).replace(/[٬،]/g,',').trim();
+  const result={};
+  const typeRules=[
+    ['مشارکت در ساخت',/مشارکت\s*در\s*ساخت/],['آپارتمان',/آپارتمان|اپارتمان/],
+    ['ویلا',/ویلا/],['تجاری',/مغازه|تجاری|دفتر کار/],['زمین',/زمین/]
+  ];
+  const foundType=typeRules.find(([,pattern])=>pattern.test(text));
+  if(foundType) result.type=foundType[0];
+  if(/رهن\s*و\s*اجاره|رهن.{0,16}اجاره/.test(text)) result.status='rent_mortgage';
+  else if(/رهن\s*کامل|رهن/.test(text)) result.status='mortgage';
+  else if(/اجاره/.test(text)) result.status='rent';
+  else if(/فروش|قیمت/.test(text)) result.status='sale';
+
+  const areaMatch=text.match(/(\d[\d,]*(?:\.\d+)?)\s*(?:متر\s*مربع|مترمربع|متر|م²)/);
+  if(areaMatch && toNumber(areaMatch[1])>0) result.area=String(toNumber(areaMatch[1]));
+  const roomMatch=text.match(/(\d+)\s*(?:خوابه|خواب|اتاق)/);
+  if(roomMatch && toNumber(roomMatch[1])>0) result.rooms=String(toNumber(roomMatch[1]));
+
+  const multipliers={میلیارد:1000000000,میلیون:1000000,هزار:1000};
+  const assignAmount=(kind,raw,scale)=>{
+    const amount=Math.round(toNumber(raw)*(multipliers[scale]||1));
+    if(amount>0 && !result[kind]) result[kind]=String(amount);
+  };
+  const labeledAmount=/(رهن|ودیعه|پیش(?:\s*پرداخت|‌پرداخت)?|اجاره|قیمت|فروش|مبلغ)\s*(?:و\s*اجاره)?\s*[:：\-=]?\s*([\d,]+(?:\.\d+)?)\s*(میلیارد|میلیون|هزار)?\s*(تومان|تومن)?/g;
+  let match;
+  while((match=labeledAmount.exec(text))){
+    const label=match[1];
+    const hasUnit=!!match[3] || !!match[4];
+    if(!hasUnit) continue;
+    if(/رهن|ودیعه|پیش/.test(label)) assignAmount('mortgage',match[2],match[3]);
+    else if(/اجاره/.test(label)) assignAmount('rent',match[2],match[3]);
+    else assignAmount('price',match[2],match[3]);
+  }
+  if(!result.price && !result.mortgage && !result.rent){
+    const amountMatch=text.match(/([\d,]+(?:\.\d+)?)\s*(میلیارد|میلیون|هزار)\s*(?:تومان|تومن)?/);
+    if(amountMatch){
+      const kind=result.status==='rent'?'rent':result.status==='mortgage'||result.status==='rent_mortgage'?'mortgage':'price';
+      assignAmount(kind,amountMatch[1],amountMatch[2]);
+    }
+  }
+  return result;
+}
+
+function parsePropertyText(){
+  const source=document.getElementById('p-text-source')?.value||'';
+  const preview=document.getElementById('p-text-extraction-preview');
+  if(!preview) return;
+  const parsed=extractPropertyFieldsFromText(source);
+  pendingPropertyTextFields=Object.keys(parsed).length?parsed:null;
+  preview.style.display='block';
+  if(!pendingPropertyTextFields){
+    preview.innerHTML='<div style="color:var(--text2);">اطلاعات قابل‌شناسایی پیدا نشد. متن را بررسی کنید یا فیلدها را دستی وارد کنید.</div>';
+    return;
+  }
+  const labels={type:'نوع ملک',status:'وضعیت',area:'متراژ',rooms:'اتاق',price:'قیمت فروش',mortgage:'مبلغ رهن',rent:'اجاره ماهیانه'};
+  const values=Object.entries(parsed).map(([key,value])=>`<div><b>${escapeHTML(labels[key]||key)}:</b> ${escapeHTML(key==='price'||key==='mortgage'||key==='rent'?new Intl.NumberFormat('fa-IR').format(toNumber(value))+' تومان':value+(key==='area'?' متر':''))}</div>`).join('');
+  preview.innerHTML=`<div style="display:grid;gap:5px;margin-bottom:10px;">${values}</div><small style="display:block;color:var(--text2);margin-bottom:10px;">فقط موارد زیر استخراج شده‌اند؛ متن اصلی ارسال یا ذخیره نشده است. پیش از ذخیره می‌توانید همه را ویرایش کنید.</small><button type="button" class="btn btn-primary btn-sm" onclick="applyPropertyTextFields()">اعمال موارد شناسایی‌شده</button>`;
+}
+
+function applyPropertyTextFields(){
+  const parsed=pendingPropertyTextFields;
+  if(!parsed) return;
+  if(parsed.type && parsed.type!==currentPropType) selectPropType(parsed.type);
+  if(parsed.status){
+    const status=document.getElementById('p-status');
+    if(status && Array.from(status.options).some(option=>option.value===parsed.status)){
+      status.value=parsed.status;
+      updatePriceFields();
+    }
+  }
+  const areaIds={'آپارتمان':'p-area','ویلا':'v-area','زمین':'l-area','تجاری':'cm-area','مشارکت در ساخت':'pt-land'};
+  const roomIds={'آپارتمان':'p-rooms','ویلا':'v-rooms','تجاری':'cm-rooms'};
+  if(parsed.area && areaIds[currentPropType]) setFieldValue(areaIds[currentPropType],parsed.area);
+  if(parsed.rooms && roomIds[currentPropType]) setFieldValue(roomIds[currentPropType],parsed.rooms);
+  if(parsed.price) setFieldValue('p-price',parsed.price);
+  if(parsed.mortgage) setFieldValue('p-mortgage',parsed.mortgage);
+  if(parsed.rent) setFieldValue('p-rent',parsed.rent);
+  refreshPropertyTitleSuggestions();
+  pendingPropertyTextFields=null;
+  const preview=document.getElementById('p-text-extraction-preview');
+  if(preview) preview.innerHTML='<div style="color:var(--green);">موارد شناسایی‌شده به فرم منتقل شد؛ می‌توانید آن‌ها را بازبینی و ویرایش کنید.</div>';
+}
+
+function clearPropertyTextSource(){
+  pendingPropertyTextFields=null;
+  const source=document.getElementById('p-text-source');
+  if(source) source.value='';
+  const preview=document.getElementById('p-text-extraction-preview');
+  if(preview){ preview.innerHTML=''; preview.style.display='none'; }
 }
 
 function refreshPropertyTitleSuggestions(){
@@ -4098,6 +4200,7 @@ function openEditProperty(id){
   if(!p) return;
   editingPropertyId = String(p.id);
   editingImagesDirty = false;
+  clearPropertyTextSource();
   selectPropType(p.type || 'سایر');
   setFieldValue('p-title', p.title || '');
   propertyTitleTouched = !!p.title;
@@ -4151,7 +4254,7 @@ async function saveProperty(){
 
     const extra = {};
     document.querySelectorAll('#prop-step2 input, #prop-step2 select, #prop-step2 textarea').forEach(el => {
-      if(el.id && !['p-title','p-status','p-price','p-mortgage','p-rent','p-owner-name','p-owner-phone','p-notes','p-images-input','p-video-url'].includes(el.id)){
+      if(el.id && !['p-title','p-text-source','p-status','p-price','p-mortgage','p-rent','p-owner-name','p-owner-phone','p-notes','p-images-input','p-video-url'].includes(el.id)){
         extra[el.id] = el.value;
       }
     });
@@ -4216,6 +4319,7 @@ async function saveProperty(){
     const pAddr = document.getElementById('p-address'); if(pAddr) pAddr.value='';
     const pLat = document.getElementById('p-lat'); if(pLat) pLat.value='';
     const pLng = document.getElementById('p-lng'); if(pLng) pLng.value='';
+    clearPropertyTextSource();
     closeModal('prop-modal');
     backToPropStep1();
     if(isCustomer) renderCustomerMarketplace();
