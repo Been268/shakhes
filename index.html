@@ -1858,17 +1858,21 @@ function profileRef(id){
         <!-- فیلد قیمت فروش -->
         <div class="form-group" id="price-sale-wrap">
           <label>قیمت فروش (تومان)</label>
-          <input type="number" id="p-price" placeholder="0">
+          <input type="text" id="p-price" inputmode="numeric" autocomplete="off" placeholder="0" oninput="propertyPriceTouched=true">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:7px;">
+            <small id="p-total-price-hint" style="color:var(--text2);">با وارد کردن متراژ، تغییر قیمت کل یا قیمت هر متر باعث محاسبه مقدار دیگر می‌شود.</small>
+            <button type="button" id="p-total-price-reset" class="btn btn-ghost btn-sm" style="display:none;" onclick="useCalculatedPropertyPrice()">استفاده از قیمت محاسبه‌شده</button>
+          </div>
         </div>
 
         <!-- فیلدهای رهن و اجاره -->
         <div class="form-group" id="price-mortgage-wrap" style="display:none;">
           <label>مبلغ رهن (تومان)</label>
-          <input type="number" id="p-mortgage" placeholder="0">
+          <input type="text" id="p-mortgage" inputmode="numeric" autocomplete="off" placeholder="0">
         </div>
         <div class="form-group" id="price-rent-wrap" style="display:none;">
           <label>اجاره ماهیانه (تومان)</label>
-          <input type="number" id="p-rent" placeholder="0">
+          <input type="text" id="p-rent" inputmode="numeric" autocomplete="off" placeholder="0">
         </div>
         <div class="form-group">
           <label>نام مالک</label>
@@ -1915,7 +1919,7 @@ function profileRef(id){
           <div class="form-group"><label>تعداد حمام</label><select id="p-bath"><option value="0">ندارد</option><option value="1">۱ عدد</option><option value="2">۲ عدد</option><option value="3">۳ عدد</option></select></div>
           <div class="form-group"><label>بالکن</label><select id="p-balcony"><option value="">ندارد</option><option>۱ بالکن</option><option>۲ بالکن</option><option>۳ بالکن</option></select></div>
           <div class="form-group"><label>تراس</label><select id="p-terrace"><option value="">ندارد</option><option>دارد - کوچک</option><option>دارد - بزرگ</option></select></div>
-          <div class="form-group"><label>قیمت هر متر (تومان)</label><input type="number" id="p-price-per-m" placeholder="0"></div>
+          <div class="form-group"><label>قیمت هر متر (تومان)</label><input type="text" inputmode="numeric" id="p-price-per-m" placeholder="0" autocomplete="off"></div>
           <div class="form-group full"><label>امکانات ویژه</label><input type="text" id="p-features" placeholder="مثال: کابینت MDF، کف پارکت، سیستم هوشمند، ..."></div>
         </div>
       </div>
@@ -1945,7 +1949,7 @@ function profileRef(id){
           <div class="form-group"><label>وضعیت برق</label><select id="v-electric"><option>دارد</option><option>ندارد</option></select></div>
           <div class="form-group"><label>وضعیت گاز</label><select id="v-gas"><option>شهری</option><option>کپسول</option><option>ندارد</option></select></div>
           <div class="form-group"><label>جهت ملک</label><select id="v-direction"><option value="">نامشخص</option><option>شمالی</option><option>جنوبی</option><option>شرقی</option><option>غربی</option><option>شمالی-شرقی</option><option>شمالی-غربی</option><option>جنوبی-شرقی</option><option>جنوبی-غربی</option></select></div>
-          <div class="form-group"><label>قیمت هر متر (تومان)</label><input type="number" id="v-price-per-m" placeholder="0"></div>
+          <div class="form-group"><label>قیمت هر متر (تومان)</label><input type="text" inputmode="numeric" id="v-price-per-m" placeholder="0" autocomplete="off"></div>
           <div class="form-group full"><label>امکانات ویژه</label><input type="text" id="v-features" placeholder="مثال: سالن ورزشی، سونا، اتاق بازی، ..."></div>
         </div>
       </div>
@@ -1968,7 +1972,7 @@ function profileRef(id){
           <div class="form-group"><label>وضعیت برق</label><select id="l-electric"><option>دارد</option><option>ندارد</option></select></div>
           <div class="form-group"><label>وضعیت گاز</label><select id="l-gas"><option>دارد</option><option>ندارد</option></select></div>
           <div class="form-group"><label>موقعیت زمین</label><select id="l-position"><option>داخل بافت شهری</option><option>حاشیه شهر</option><option>خارج از شهر</option><option>روستایی</option><option>صنعتی</option></select></div>
-          <div class="form-group"><label>قیمت هر متر (تومان)</label><input type="number" id="l-price-per-m" placeholder="0"></div>
+          <div class="form-group"><label>قیمت هر متر (تومان)</label><input type="text" inputmode="numeric" id="l-price-per-m" placeholder="0" autocomplete="off"></div>
         </div>
       </div>
 
@@ -1996,7 +2000,7 @@ function profileRef(id){
           <div class="form-group"><label>وضعیت گاز</label><select id="cm-gas"><option>دارد</option><option>ندارد</option></select></div>
           <div class="form-group"><label>میزان تردد</label><select id="cm-traffic"><option>بسیار شلوغ</option><option>شلوغ</option><option>متوسط</option><option>کم</option></select></div>
           <div class="form-group"><label>موقعیت تجاری</label><select id="cm-commercial-pos"><option>پاساژ مرکزی</option><option>بازار</option><option>خیابان تجاری</option><option>مرکز خرید</option><option>خیابان مسکونی</option></select></div>
-          <div class="form-group"><label>قیمت هر متر (تومان)</label><input type="number" id="cm-price-per-m" placeholder="0"></div>
+          <div class="form-group"><label>قیمت هر متر (تومان)</label><input type="text" inputmode="numeric" id="cm-price-per-m" placeholder="0" autocomplete="off"></div>
           <div class="form-group full"><label>امکانات ویژه</label><input type="text" id="cm-features" placeholder="مثال: سیستم اعلام حریق، دوربین مداربسته، ..."></div>
         </div>
       </div>
@@ -2015,7 +2019,7 @@ function profileRef(id){
           <div class="form-group"><label>نوع سند زمین</label><select id="pt-deed"><option>تک‌برگ</option><option>منگوله‌دار</option><option>وکالتی</option></select></div>
           <div class="form-group"><label>قدمت بنا (سال)</label><input type="number" id="pt-age" placeholder="0"></div>
           <div class="form-group"><label>نوع ملک فعلی</label><select id="pt-current-type"><option>زمین خالی</option><option>خانه کلنگی</option><option>آپارتمان قدیمی</option><option>ویلا قدیمی</option><option>انبار / سوله</option><option>سایر</option></select></div>
-          <div class="form-group"><label>قیمت هر متر زمین (تومان)</label><input type="number" id="pt-price-per-m" placeholder="0"></div>
+          <div class="form-group"><label>قیمت هر متر زمین (تومان)</label><input type="text" inputmode="numeric" id="pt-price-per-m" placeholder="0" autocomplete="off"></div>
         </div>
       </div>
 
@@ -3103,6 +3107,11 @@ async function changeUserRole(userId,role){
 let editingPropertyId = null;
 let propertyTitleTouched = false;
 let propertyTitleMode = 'short';
+let propertyPriceTouched = false;
+let propertyPriceLastCalculated = '';
+let propertyPriceSyncSource = 'per-meter';
+let propertyPriceLastCalculatedPerMeter = '';
+let propertyPriceLastCalculatedPerMeterId = '';
 let pendingPropertyTextFields = null;
 let editingClientId = null;
 let clientDynamicFieldCache = {};
@@ -3144,6 +3153,11 @@ function resetPropertyForm(){
   editingImagesDirty = false;
   propertyTitleTouched = false;
   propertyTitleMode = 'short';
+  propertyPriceTouched = false;
+  propertyPriceLastCalculated = '';
+  propertyPriceSyncSource = 'per-meter';
+  propertyPriceLastCalculatedPerMeter = '';
+  propertyPriceLastCalculatedPerMeterId = '';
   clearPropertyTextSource();
   document.querySelectorAll('#prop-step2 input, #prop-step2 select, #prop-step2 textarea').forEach(el => {
     if(el.type === 'checkbox') el.checked = false;
@@ -3367,6 +3381,13 @@ const MONEY_INPUT_IDS = new Set([
   'c-budget','c-price-per-m','c-rent-max','c-deposit-max',
   'd-price','d-commission','inc-amount','ct-final-price'
 ]);
+const PROPERTY_AMOUNT_IDS = new Set(['p-price','p-mortgage','p-rent','p-price-per-m','v-price-per-m','l-price-per-m','cm-price-per-m','pt-price-per-m','p-price-per-meter']);
+function amountDigits(value){ return normalizeDigits(value).replace(/\D/g,''); }
+function rawAmountValue(value){ const digits=amountDigits(value); return digits ? BigInt(digits).toString() : ''; }
+function formatAmountForInput(value){
+  const digits=amountDigits(value);
+  return digits ? toPersianDigits(digits.replace(/\B(?=(\d{3})+(?!\d))/g,'٬')) : '';
+}
 const MONEY_INPUT_UNITS = {
   'p-rent':'تومان در ماه','c-rent-max':'تومان در ماه',
   'p-price-per-m':'تومان برای هر متر مربع','v-price-per-m':'تومان برای هر متر مربع',
@@ -3453,11 +3474,27 @@ function updateMoneyInputWords(input){
 }
 
 function refreshMoneyWordInputs(root=document){
-  if(root && root.matches && root.matches('input[type="number"]')) updateMoneyInputWords(root);
-  if(root && root.querySelectorAll) root.querySelectorAll('input[type="number"]').forEach(updateMoneyInputWords);
+  const inputs=[];
+  if(root && root.matches && root.matches('input')) inputs.push(root);
+  if(root && root.querySelectorAll) inputs.push(...root.querySelectorAll('input'));
+  inputs.forEach(input=>{
+    if(PROPERTY_AMOUNT_IDS.has(input.id)) input.value=formatAmountForInput(input.value);
+    updateMoneyInputWords(input);
+  });
 }
 
 document.addEventListener('input', event => updateMoneyInputWords(event.target));
+document.addEventListener('focusin', event=>{
+  const input=event.target;
+  if(!PROPERTY_AMOUNT_IDS.has(input?.id)) return;
+  input.value=amountDigits(input.value);
+});
+document.addEventListener('focusout', event=>{
+  const input=event.target;
+  if(!PROPERTY_AMOUNT_IDS.has(input?.id)) return;
+  input.value=formatAmountForInput(input.value);
+  updateMoneyInputWords(input);
+});
 if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => refreshMoneyWordInputs(document));
 else refreshMoneyWordInputs(document);
 
@@ -3555,6 +3592,7 @@ function updatePriceFields() {
     saleWrap.style.display = 'block';
   }
   refreshPropertyTitleSuggestions();
+  updateCalculatedPropertyPrice();
 }
 
 function selectPropType(type) {
@@ -3590,6 +3628,127 @@ function backToPropStep1() {
 }
 
 function gVal(id) { const el = document.getElementById(id); return el ? el.value : ''; }
+
+const PROPERTY_PRICE_FIELDS={
+  'آپارتمان':['p-area','p-price-per-m'], 'ویلا':['v-area','v-price-per-m'],
+  'زمین':['l-area','l-price-per-m'], 'تجاری':['cm-area','cm-price-per-m'],
+  'مشارکت در ساخت':['pt-land','pt-price-per-m']
+};
+
+function currentPropertyPriceFields(){ return PROPERTY_PRICE_FIELDS[currentPropType] || null; }
+
+function calculatePropertyTotalFromForm(){
+  const fields=currentPropertyPriceFields();
+  if(!fields) return null;
+  const area=toNumber(gVal(fields[0]));
+  const unitPrice=toNumber(gVal(fields[1]));
+  const total=Math.round(area*unitPrice);
+  return area>0 && unitPrice>0 && Number.isFinite(total) && total>0 ? total : null;
+}
+
+function calculatePropertyPricePerMeterFromTotal(){
+  const fields=currentPropertyPriceFields();
+  if(!fields) return null;
+  const area=toNumber(gVal(fields[0]));
+  const total=toNumber(gVal('p-price'));
+  const unitPrice=Math.round(total/area);
+  return area>0 && total>0 && Number.isFinite(unitPrice) && unitPrice>0 ? unitPrice : null;
+}
+
+function clearLastCalculatedPerMeter(){
+  if(propertyPriceLastCalculatedPerMeter && propertyPriceLastCalculatedPerMeterId){
+    const field=document.getElementById(propertyPriceLastCalculatedPerMeterId);
+    if(field && rawAmountValue(field.value)===propertyPriceLastCalculatedPerMeter){
+      field.value='';
+      updateMoneyInputWords(field);
+    }
+  }
+  propertyPriceLastCalculatedPerMeter='';
+  propertyPriceLastCalculatedPerMeterId='';
+}
+
+function updateCalculatedPropertyPrice(source=null){
+  if(source) propertyPriceSyncSource=source;
+  const input=document.getElementById('p-price');
+  const hint=document.getElementById('p-total-price-hint');
+  const button=document.getElementById('p-total-price-reset');
+  if(!input || !hint) return;
+  if(['rent','mortgage','rent_mortgage'].includes(gVal('p-status'))){
+    if(button) button.style.display='none';
+    hint.textContent='برای ملک اجاره‌ای، مبلغ رهن و اجاره را در فیلدهای مربوط وارد کنید.';
+    return;
+  }
+  if(propertyPriceSyncSource==='idle'){
+    if(button) button.style.display='none';
+    hint.textContent='مقادیر ذخیره‌شده حفظ شده‌اند؛ برای همگام‌سازی، قیمت کل یا قیمت هر متر را ویرایش کنید.';
+    return;
+  }
+  if(propertyPriceSyncSource==='total'){
+    const fields=currentPropertyPriceFields();
+    const unitPrice=calculatePropertyPricePerMeterFromTotal();
+    if(!fields || !unitPrice){
+      clearLastCalculatedPerMeter();
+      propertyPriceLastCalculated='';
+      if(button) button.style.display='none';
+      hint.textContent='برای محاسبه قیمت هر متر، متراژ و قیمت کل را وارد کنید.';
+      return;
+    }
+    const unitField=document.getElementById(fields[1]);
+    if(!unitField) return;
+    const formattedUnitPrice=formatAmountForInput(unitPrice);
+    unitField.value=formattedUnitPrice;
+    propertyPriceLastCalculatedPerMeter=String(unitPrice);
+    propertyPriceLastCalculatedPerMeterId=fields[1];
+    updateMoneyInputWords(unitField);
+    propertyPriceLastCalculated='';
+    const roundedTotal=calculatePropertyTotalFromForm();
+    hint.textContent=`قیمت هر متر محاسبه‌شده: ${formattedUnitPrice} تومان`;
+    if(button) button.style.display=roundedTotal && roundedTotal!==toNumber(input.value)?'inline-flex':'none';
+    return;
+  }
+  const total=calculatePropertyTotalFromForm();
+  if(!total){
+    if(!propertyPriceTouched && propertyPriceLastCalculated && rawAmountValue(input.value)===propertyPriceLastCalculated){
+      input.value='';
+      updateMoneyInputWords(input);
+    }
+    propertyPriceLastCalculated='';
+    hint.textContent='برای محاسبه قیمت کل، متراژ و قیمت هر متر را وارد کنید.';
+    if(button) button.style.display='none';
+    return;
+  }
+  const formatted=formatAmountForInput(total);
+  hint.textContent=`قیمت کل محاسبه‌شده: ${formatted} تومان`;
+  if(!propertyPriceTouched){
+    input.value=formatted;
+    propertyPriceLastCalculated=String(total);
+    updateMoneyInputWords(input);
+  }
+  if(button) button.style.display=propertyPriceTouched?'inline-flex':'none';
+}
+
+function useCalculatedPropertyPrice(){
+  propertyPriceSyncSource='per-meter';
+  propertyPriceTouched=false;
+  updateCalculatedPropertyPrice('per-meter');
+}
+
+document.addEventListener('input',event=>{
+  const id=event.target?.id;
+  if(id==='p-price'){
+    propertyPriceTouched=true;
+    propertyPriceLastCalculated='';
+    updateCalculatedPropertyPrice('total');
+  } else if(['p-price-per-m','v-price-per-m','l-price-per-m','cm-price-per-m','pt-price-per-m'].includes(id)){
+    propertyPriceTouched=false;
+    propertyPriceLastCalculatedPerMeter='';
+    propertyPriceLastCalculatedPerMeterId='';
+    updateCalculatedPropertyPrice('per-meter');
+  } else if(['p-area','v-area','l-area','cm-area','pt-land'].includes(id)){
+    if(propertyPriceSyncSource==='idle') propertyPriceSyncSource=propertyPriceTouched?'total':'per-meter';
+    updateCalculatedPropertyPrice();
+  }
+});
 
 function propertyTitleVariants(){
   const type=String(currentPropType||'ملک').trim();
@@ -3701,20 +3860,27 @@ function applyPropertyTextFields(){
   }
   const areaIds={'آپارتمان':'p-area','ویلا':'v-area','زمین':'l-area','تجاری':'cm-area','مشارکت در ساخت':'pt-land'};
   const roomIds={'آپارتمان':'p-rooms','ویلا':'v-rooms','تجاری':'cm-rooms'};
-  if(parsed.area && areaIds[currentPropType]) setFieldValue(areaIds[currentPropType],parsed.area);
-  if(parsed.rooms && roomIds[currentPropType]) setFieldValue(roomIds[currentPropType],parsed.rooms);
   const floorIds={'آپارتمان':'p-floor','تجاری':'cm-floor'};
   const yearIds={'آپارتمان':'p-year','ویلا':'v-year','تجاری':'cm-year','سایر':'o-year'};
+  if(parsed.area && areaIds[currentPropType]) setFieldValue(areaIds[currentPropType],parsed.area);
+  if(parsed.rooms && roomIds[currentPropType]) setFieldValue(roomIds[currentPropType],parsed.rooms);
   if(parsed.floor){
     if(currentPropType==='ویلا') setFieldValue('v-floors',parsed.totalFloors||parsed.floor);
     else if(floorIds[currentPropType]) setFieldValue(floorIds[currentPropType],parsed.floor);
   }
   if(parsed.totalFloors && currentPropType==='آپارتمان') setFieldValue('p-total-floors',parsed.totalFloors);
   if(parsed.year && yearIds[currentPropType]) setFieldValue(yearIds[currentPropType],parsed.year);
-  if(parsed.price) setFieldValue('p-price',parsed.price);
+  if(parsed.price){
+    setFieldValue('p-price',parsed.price);
+    propertyPriceTouched=true;
+    propertyPriceSyncSource='total';
+    propertyPriceLastCalculated='';
+  }
   if(parsed.mortgage) setFieldValue('p-mortgage',parsed.mortgage);
   if(parsed.rent) setFieldValue('p-rent',parsed.rent);
   refreshPropertyTitleSuggestions();
+  updateCalculatedPropertyPrice();
+  refreshMoneyWordInputs(document.getElementById('prop-step2'));
   pendingPropertyTextFields=null;
   const preview=document.getElementById('p-text-extraction-preview');
   if(preview) preview.innerHTML='<div style="color:var(--green);">موارد شناسایی‌شده به فرم منتقل شد؛ می‌توانید آن‌ها را بازبینی و ویرایش کنید.</div>';
@@ -4226,6 +4392,11 @@ function openEditProperty(id){
   if(!p) return;
   editingPropertyId = String(p.id);
   editingImagesDirty = false;
+  propertyPriceTouched = !!p.price;
+  propertyPriceLastCalculated = '';
+  propertyPriceSyncSource = 'idle';
+  propertyPriceLastCalculatedPerMeter = '';
+  propertyPriceLastCalculatedPerMeterId = '';
   clearPropertyTextSource();
   selectPropType(p.type || 'سایر');
   setFieldValue('p-title', p.title || '');
@@ -4273,19 +4444,19 @@ async function saveProperty(){
   try {
     const status = document.getElementById('p-status').value;
     let priceData = {};
-    if(status==='rent'){ priceData={mortgage:gVal('p-mortgage'),rent:gVal('p-rent')}; }
-    else if(status==='mortgage'){ priceData={mortgage:gVal('p-mortgage')}; }
-    else if(status==='rent_mortgage'){ priceData={mortgage:gVal('p-mortgage'),rent:gVal('p-rent')}; }
-    else { priceData={price:gVal('p-price')}; }
+    if(status==='rent'){ priceData={mortgage:rawAmountValue(gVal('p-mortgage')),rent:rawAmountValue(gVal('p-rent'))}; }
+    else if(status==='mortgage'){ priceData={mortgage:rawAmountValue(gVal('p-mortgage'))}; }
+    else if(status==='rent_mortgage'){ priceData={mortgage:rawAmountValue(gVal('p-mortgage')),rent:rawAmountValue(gVal('p-rent'))}; }
+    else { priceData={price:rawAmountValue(gVal('p-price'))}; }
 
     const extra = {};
     document.querySelectorAll('#prop-step2 input, #prop-step2 select, #prop-step2 textarea').forEach(el => {
       if(el.id && !['p-title','p-text-source','p-status','p-price','p-mortgage','p-rent','p-owner-name','p-owner-phone','p-notes','p-images-input','p-video-url'].includes(el.id)){
-        extra[el.id] = el.value;
+        extra[el.id] = PROPERTY_AMOUNT_IDS.has(el.id) ? rawAmountValue(el.value) : el.value;
       }
     });
 
-    const pricePerMeter = ['p-price-per-meter','p-price-per-m','v-price-per-m','l-price-per-m','cm-price-per-m','pt-price-per-m'].map(gVal).find(Boolean) || '';
+    const pricePerMeter = ['p-price-per-meter','p-price-per-m','v-price-per-m','l-price-per-m','cm-price-per-m','pt-price-per-m'].map(id=>rawAmountValue(gVal(id))).find(Boolean) || '';
 
     // برای اینکه تصویر روی پلن Spark هم بعد از refresh باقی بماند،
     // قبل از ذخیره به‌صورت فشرده داخل همان سند ملک نگهداری می‌شود.
