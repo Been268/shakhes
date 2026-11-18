@@ -4121,6 +4121,10 @@ function openPropertyDetails(id){
   const address = p.address || (p.extra && (p.extra['p-address'] || p.extra.address || p.extra.location || p.extra['p-location'])) || '';
   const images = (p.images || []).map(img => typeof img === 'string' ? {src:img,name:''} : {src:img.url || img.data,name:img.name || ''}).filter(img => img.src);
   const extraEntries = Object.entries(p.extra || {}).filter(([,value]) => value !== null && value !== undefined && String(value) !== '');
+  const completeness=getPropertyCompleteness(p);
+  const completionColor=completeness.score===100?'#22c55e':'#eab308';
+  const completionRows=completeness.checks.map(check=>`<div style="display:flex;align-items:flex-start;gap:9px;padding:8px 0;border-bottom:1px solid var(--border);"><span style="font-weight:800;color:${check.complete?'#4ade80':'#fbbf24'};">${check.complete?'✓':'!'}</span><div><strong style="font-size:12px;">${escapeHTML(check.label)}</strong><div style="font-size:11px;color:var(--text2);margin-top:2px;">${check.complete?'ثبت شده':escapeHTML(check.detail)}</div></div></div>`).join('');
+  const completenessSection=`<div class="property-detail-section"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><div class="property-detail-section-title" style="margin:0;">📊 تکمیل اطلاعات فایل</div><strong style="color:${completionColor};">${completeness.score}%</strong></div><div role="progressbar" aria-label="درصد تکمیل فایل" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${completeness.score}" style="height:8px;border-radius:99px;background:var(--surface3);overflow:hidden;margin-bottom:8px;"><div style="height:100%;width:${completeness.score}%;background:${completionColor};transition:width .2s;"></div></div><div>${completionRows}</div><small style="display:block;color:var(--text3);margin-top:8px;">هر یک از ۴ معیار عکس، متراژ، مختصات و اطلاعات مالک ۲۵٪ امتیاز دارد.</small></div>`;
 
   const core = [
     propertyDetailCard('نوع ملک', propertyDetailValue(p.type)),
@@ -4146,6 +4150,7 @@ function openPropertyDetails(id){
   document.getElementById('property-details-title').textContent = `🔎 جزئیات — ${title}`;
   document.getElementById('property-details-content').innerHTML = `
     <div class="property-detail-hero"><div><div class="property-detail-main-title">${escapeHTML(title)}</div><div class="property-detail-subtitle">${escapeHTML(status)}${p.type ? ` · ${escapeHTML(p.type)}` : ''}</div></div><span class="badge ${approval === 'تایید شده' ? 'badge-green' : approval === 'رد شده' ? 'badge-gray' : 'badge-gold'}">${escapeHTML(approval)}</span></div>
+    ${completenessSection}
     <div class="property-detail-section"><div class="property-detail-section-title">📋 اطلاعات اصلی</div><div class="property-detail-grid">${core || '<div class="property-detail-empty">اطلاعات اصلی ثبت نشده است</div>'}</div></div>
     ${extra ? `<div class="property-detail-section"><div class="property-detail-section-title">⚙️ مشخصات تکمیلی</div><div class="property-detail-grid">${extra}</div></div>` : ''}
     ${notes}${media}${videos}${editAction}
@@ -4565,8 +4570,39 @@ function getPropPrice(p){
 
 function getPropArea(p){
   const extra = p.extra || {};
-  const a = extra.area || extra.land || extra['p-area'] || extra['v-area'] || extra['l-area'] || extra['v-land'] || extra['pt-land'] || extra['cm-area'] || extra['o-area'];
-  return toNumber(a);
+  const values=[extra.area,extra.land,extra['p-area'],extra['v-area'],extra['l-area'],extra['v-land'],extra['pt-land'],extra['cm-area'],extra['o-area']];
+  return values.map(toNumber).find(value=>value>0) || 0;
+}
+
+function getPropertyCompleteness(p){
+  p=p||{};
+  const extra=p.extra||{};
+  const images=Array.isArray(p.images)?p.images:[];
+  const hasPhoto=images.some(image=>typeof image==='string'?image.trim().length>0:!!(image&&(image.url||image.data||image.path)));
+  const hasArea=getPropArea(p)>0;
+  const coordinateIsValid=(value,min,max)=>{
+    if(value===null||value===undefined||String(value).trim()==='') return false;
+    const normalized=normalizeDigits(String(value).trim()).replace(/[٫]/g,'.');
+    if(!/^-?\d+(?:\.\d+)?$/.test(normalized)) return false;
+    const number=Number(normalized);
+    return Number.isFinite(number)&&number>=min&&number<=max;
+  };
+  const lat=p.lat??extra['p-lat'];
+  const lng=p.lng??extra['p-lng'];
+  const hasCoordinates=coordinateIsValid(lat,-90,90)&&coordinateIsValid(lng,-180,180);
+  const ownerName=String(p.ownerName||extra['p-owner-name']||'').trim();
+  const ownerPhone=String(p.ownerPhone||extra['p-owner-phone']||'').trim();
+  const missingOwner=[];
+  if(!ownerName) missingOwner.push('نام مالک');
+  if(!ownerPhone) missingOwner.push('شماره تماس مالک');
+  const checks=[
+    {key:'photo',label:'عکس ملک',complete:hasPhoto,detail:'حداقل یک عکس ملک اضافه کنید.'},
+    {key:'area',label:'متراژ',complete:hasArea,detail:'متراژ معتبر وارد نشده است.'},
+    {key:'coordinates',label:'مختصات نقشه',complete:hasCoordinates,detail:'عرض و طول جغرافیایی معتبر ثبت نشده‌اند.'},
+    {key:'owner',label:'اطلاعات مالک',complete:!!ownerName&&!!ownerPhone,detail:missingOwner.length?`ثبت نشده: ${missingOwner.join(' و ')}`:''}
+  ];
+  const completed=checks.filter(check=>check.complete).length;
+  return {checks,completed,total:checks.length,score:Math.round(completed*100/checks.length)};
 }
 
 function renderProperties(){
@@ -4633,6 +4669,9 @@ function renderProperties(){
   el.innerHTML = `<table><thead><tr><th>تصویر</th><th>عنوان</th><th>نوع</th><th>متراژ</th><th>قیمت</th><th>وضعیت ملک</th><th>تایید</th><th>مالک</th><th>تماس</th><th>عملیات</th><th>آگهی</th></tr></thead><tbody>
   ${list.map(p=>{
     const approval = p.approvalStatus || 'pending';
+    const completeness=getPropertyCompleteness(p);
+    const missingCompletionLabels=completeness.checks.filter(check=>!check.complete).map(check=>check.label);
+    const completionStyle=completeness.score===100?'background:#0b4a2e;color:#4ade80;':'background:#5a4509;color:#ffd166;';
     // قفل حذف: مشاور نمی‌تواند فایل تایید شده را حذف کند
     const canDelete = isAdmin || approval !== 'approved';
     const adImagesB64 = (p.images||[]).map(im=>im.url||im.data).filter(Boolean);
@@ -4658,6 +4697,8 @@ function renderProperties(){
         ${p.videos&&p.videos.length?` 🎬 ${p.videos.length}`:''}
       </span>` : ''}
       ${p.userName ? `<br><span style="font-size:10px;color:var(--text3);">👤 ${escapeHTML(p.userName)}</span>` : ''}
+      <br><span class="badge" style="${completionStyle}font-size:10px;">${completeness.score===100?'✓ کامل':'⚠ ناقص'} ${completeness.score}% (${completeness.completed}/${completeness.total})</span>
+      ${missingCompletionLabels.length?`<br><span style="font-size:10px;color:var(--text3);">نیازمند: ${escapeHTML(missingCompletionLabels.join('، '))}</span>`:''}
     </td>
     <td>${escapeHTML(p.type)}</td>
     <td>${p.extra&&p.extra.area?escapeHTML(p.extra.area)+' م²':(p.extra&&p.extra.land?escapeHTML(p.extra.land)+' م²':'—')}</td>
