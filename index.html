@@ -3794,7 +3794,7 @@ function openPropertyDetails(id){
   const notes = p.notes ? `<div class="property-detail-section"><div class="property-detail-section-title">📝 توضیحات</div><div class="property-detail-notes">${propertyDetailValue(p.notes)}</div></div>` : '';
   const media = images.length ? `<div class="property-detail-section"><div class="property-detail-section-title">📸 تصاویر (${images.length})</div><div class="property-detail-media">${images.map((img,index) => `<img src="${safeURL(img.src)}" alt="${escapeHTML(img.name || title)}" title="برای بزرگ‌نمایی کلیک کنید" data-property-id="${escapeHTML(String(p.id))}" data-image-index="${index}" onclick="openPropertyLightbox(this.dataset.propertyId, this.dataset.imageIndex)">`).join('')}</div></div>` : '';
   const videos = (p.videos || []).filter(Boolean).length ? `<div class="property-detail-section"><div class="property-detail-section-title">🎬 ویدیوها</div>${p.videos.filter(Boolean).map(url => `<a href="${safeURL(url)}" target="_blank" rel="noopener noreferrer" class="property-detail-link">${escapeHTML(url)}</a>`).join('')}</div>` : '';
-  const editAction = `<div style="display:flex;justify-content:flex-start;margin-top:16px;"><button class="btn btn-primary" data-property-id="${escapeHTML(String(p.id))}" onclick="closeModal('property-details-modal'); openEditProperty(this.dataset.propertyId)">✏️ ویرایش ملک</button></div>`;
+  const editAction = `<div style="display:flex;justify-content:flex-start;flex-wrap:wrap;gap:8px;margin-top:16px;"><button class="btn btn-ghost" data-property-id="${escapeHTML(String(p.id))}" onclick="sharePropertyCard(this.dataset.propertyId)">📤 ساخت کارت اشتراک‌گذاری</button><button class="btn btn-primary" data-property-id="${escapeHTML(String(p.id))}" onclick="closeModal('property-details-modal'); openEditProperty(this.dataset.propertyId)">✏️ ویرایش ملک</button></div>`;
 
   document.getElementById('property-details-title').textContent = `🔎 جزئیات — ${title}`;
   document.getElementById('property-details-content').innerHTML = `
@@ -3804,6 +3804,87 @@ function openPropertyDetails(id){
     ${notes}${media}${videos}${editAction}
   `;
   openModal('property-details-modal');
+}
+
+function propertyShareData(property){
+  const status = PROPERTY_STATUS_LABELS[property.status] || 'ملک';
+  const type = String(property.type || '').trim();
+  const title = [type, status].filter(Boolean).join(' — ') || 'فرصت ملکی';
+  const facts = [];
+  const area = getPropArea(property);
+  const extra = property.extra || {};
+  const rooms = extra['p-rooms'] || extra['v-rooms'] || extra['cm-rooms'] || extra.rooms;
+  if(area) facts.push(`متراژ: ${toPersianDigits(fmt(area))} متر`);
+  if(rooms) facts.push(`اتاق: ${toPersianDigits(String(rooms))}`);
+  if(property.price) facts.push(`قیمت: ${toPersianDigits(new Intl.NumberFormat('fa-IR').format(toNumber(property.price)))} تومان`);
+  if(property.mortgage) facts.push(`رهن: ${toPersianDigits(new Intl.NumberFormat('fa-IR').format(toNumber(property.mortgage)))} تومان`);
+  if(property.rent) facts.push(`اجاره ماهانه: ${toPersianDigits(new Intl.NumberFormat('fa-IR').format(toNumber(property.rent)))} تومان`);
+  if(!facts.length) facts.push('برای دریافت جزئیات بیشتر تماس بگیرید');
+  return {title, facts, caption:`${title}\n${facts.join('\n')}\n\nاملاک شاخص`};
+}
+
+function wrapShareCardText(ctx, text, x, y, maxWidth, lineHeight, maxLines=3){
+  const words=String(text).split(/\s+/); let line=''; let lines=0;
+  for(const word of words){
+    const candidate=line ? `${line} ${word}` : word;
+    if(ctx.measureText(candidate).width > maxWidth && line){
+      ctx.fillText(line,x,y); y+=lineHeight; lines++; line=word;
+      if(lines>=maxLines-1) break;
+    } else line=candidate;
+  }
+  if(line && lines<maxLines){ ctx.fillText(line,x,y); lines++; }
+  return y + lineHeight;
+}
+
+async function sharePropertyCard(id){
+  const property=state.properties.find(item=>String(item.id)===String(id));
+  if(!property) return;
+  const share=propertyShareData(property);
+  const canvas=document.createElement('canvas');
+  canvas.width=1080; canvas.height=1350;
+  const ctx=canvas.getContext('2d');
+  if(!ctx){ window.alert('ساخت کارت تصویری در این مرورگر پشتیبانی نمی‌شود.'); return; }
+
+  const bg=ctx.createLinearGradient(0,0,1080,1350);
+  bg.addColorStop(0,'#171d27'); bg.addColorStop(1,'#0e1117');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,1080,1350);
+  ctx.strokeStyle='#e8a838'; ctx.lineWidth=5; ctx.strokeRect(36,36,1008,1278);
+  ctx.fillStyle='rgba(232,168,56,.12)'; ctx.beginPath(); ctx.arc(970,170,180,0,Math.PI*2); ctx.fill();
+  ctx.direction='rtl'; ctx.textAlign='right';
+  ctx.fillStyle='#e8a838'; ctx.font='bold 42px Vazirmatn, sans-serif';
+  ctx.fillText('املاک شاخص',950,130);
+  ctx.fillStyle='#9aa5b1'; ctx.font='28px Vazirmatn, sans-serif';
+  ctx.fillText('مشخصات ملک',950,185);
+  ctx.fillStyle='#f3f5f7'; ctx.font='bold 58px Vazirmatn, sans-serif';
+  let y=340;
+  y=wrapShareCardText(ctx,share.title,950,y,820,78,2)+32;
+  ctx.fillStyle='#e8a838'; ctx.fillRect(130,y,820,3); y+=90;
+  ctx.fillStyle='#e6edf3'; ctx.font='36px Vazirmatn, sans-serif';
+  share.facts.forEach(fact=>{ y=wrapShareCardText(ctx,fact,930,y,800,58,2)+28; });
+  ctx.fillStyle='#aab3bd'; ctx.font='28px Vazirmatn, sans-serif';
+  ctx.fillText('برای اطلاعات و هماهنگی، با مشاور خود تماس بگیرید',950,1195);
+  ctx.fillStyle='#e8a838'; ctx.font='bold 26px Vazirmatn, sans-serif';
+  ctx.fillText('املاک شاخص',950,1260);
+
+  const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+  if(!blob){ window.alert('ساخت کارت تصویری ناموفق بود.'); return; }
+  const file=new File([blob],' کارت-ملک.png'.trim(),{type:'image/png'});
+  try{
+    if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({title:share.title,text:share.caption,files:[file]});
+      return;
+    }
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement('a'); link.href=url; link.download='کارت-ملک.png';
+    document.body.appendChild(link); link.click(); link.remove();
+    if(navigator.clipboard?.writeText) await navigator.clipboard.writeText(share.caption);
+    window.alert('کارت تصویری دانلود شد. متن معرفی هم کپی شد؛ حالا می‌توانید هر دو را در پیام‌رسان دلخواه ارسال کنید.');
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }catch(error){
+    if(error?.name==='AbortError') return;
+    console.error('Property share failed:',error);
+    window.alert('اشتراک‌گذاری انجام نشد. لطفاً دوباره تلاش کنید.');
+  }
 }
 
 // Gallery viewer
