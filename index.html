@@ -4384,6 +4384,177 @@ function openPropertyLightbox(id, index){
   openLightbox();
 }
 
+const PROPERTY_PRIVATE_DOCUMENT_BUCKET='property-private-documents';
+const PROPERTY_PRIVATE_DOCUMENT_MAX_BYTES=20*1024*1024;
+const PROPERTY_PRIVATE_DOCUMENT_MAX_BATCH=10;
+const PROPERTY_PRIVATE_DOCUMENT_TYPES=new Set(['application/pdf','image/jpeg','image/png','image/webp','image/heic','image/heif']);
+let propertyPrivateDocumentsRequestId=0;
+let propertyPrivateDocumentsBusy=false;
+
+function canManagePrivatePropertyDocuments(){
+  return isAdmin() && currentUser?.status === 'active';
+}
+
+function propertyPrivateDocumentFolder(property){
+  const ownerUid=String(property?._uid||property?.userId||'').trim().replace(/[^a-zA-Z0-9._-]/g,'_');
+  const propertyId=String(property?.id??'').replace(/[^a-zA-Z0-9._-]/g,'_');
+  if(!ownerUid||!propertyId||ownerUid==='.'||ownerUid==='..'||propertyId==='.'||propertyId==='..') return '';
+  return `properties/${ownerUid}/${propertyId}/documents`;
+}
+
+function safePropertyPrivateDocumentName(name){
+  return String(name||'document').normalize('NFKC')
+    .replace(/[\\/\u0000-\u001f\u007f]/g,'_')
+    .replace(/\s+/g,'_')
+    .replace(/^\.+$/,'document')
+    .slice(0,100) || 'document';
+}
+
+function propertyPrivateDocumentMime(file){
+  const mime=String(file?.type||'').toLowerCase();
+  if(PROPERTY_PRIVATE_DOCUMENT_TYPES.has(mime)) return mime;
+  const extension=String(file?.name||'').split('.').pop().toLowerCase();
+  const byExtension={pdf:'application/pdf',jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',heic:'image/heic',heif:'image/heif'};
+  return byExtension[extension] || '';
+}
+
+function propertyPrivateDocumentDisplayName(storedName){
+  return String(storedName||'').replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i,'') || 'مدرک';
+}
+
+function setPropertyPrivateDocumentsStatus(message,isError=false){
+  const status=document.getElementById('property-private-documents-status');
+  if(!status) return;
+  status.textContent=String(message||'');
+  status.style.color=isError?'var(--red)':'var(--text2)';
+}
+
+async function loadPropertyPrivateDocuments(property,statusMessage=''){
+  if(!canManagePrivatePropertyDocuments()) return;
+  const panel=document.getElementById('property-private-documents');
+  if(!panel||String(panel.dataset.propertyId)!==String(property?.id)) return;
+  const requestId=++propertyPrivateDocumentsRequestId;
+  const folder=propertyPrivateDocumentFolder(property);
+  const list=document.getElementById('property-private-document-list');
+  if(list) list.textContent='در حال دریافت فهرست مدارک خصوصی…';
+  if(!folder){ setPropertyPrivateDocumentsStatus('شناسهٔ مالک این فایل در دسترس نیست.',true); return; }
+  try {
+    const result=await _supabase.storage.from(PROPERTY_PRIVATE_DOCUMENT_BUCKET).list(folder,{limit:100,offset:0});
+    if(result.error) throw result.error;
+    const currentPanel=document.getElementById('property-private-documents');
+    if(requestId!==propertyPrivateDocumentsRequestId||!canManagePrivatePropertyDocuments()||!currentPanel||String(currentPanel.dataset.propertyId)!==String(property.id)) return;
+    const documents=(result.data||[]).filter(item=>item&&item.id&&item.name);
+    if(list){
+      list.innerHTML=documents.length?documents.map(item=>{
+        const name=propertyPrivateDocumentDisplayName(item.name);
+        const path=`${folder}/${item.name}`;
+        const size=Number(item.metadata?.size)||0;
+        const sizeLabel=size?`${toPersianDigits(String(Math.max(1,Math.round(size/1024))))} کیلوبایت`:'';
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:9px 0;border-bottom:1px solid var(--border);"><div style="min-width:0;flex:1;"><strong style="font-size:12px;overflow-wrap:anywhere;">${escapeHTML(name)}</strong>${sizeLabel?`<small style="display:block;color:var(--text3);margin-top:3px;">${sizeLabel}</small>`:''}</div><div style="display:flex;gap:6px;"><button type="button" class="btn btn-ghost btn-sm" data-private-doc-path="${escapeHTML(path)}" data-private-doc-name="${escapeHTML(name)}" onclick="downloadPropertyPrivateDocument(this.dataset.privateDocPath,this.dataset.privateDocName)">⬇️ دریافت</button><button type="button" class="btn btn-danger btn-sm" data-private-doc-path="${escapeHTML(path)}" data-private-doc-name="${escapeHTML(name)}" onclick="deletePropertyPrivateDocument(this.dataset.privateDocPath,this.dataset.privateDocName)">حذف</button></div></div>`;
+      }).join(''):'<div style="font-size:11px;color:var(--text3);padding:8px 0;">مدرک محرمانه‌ای برای این ملک ثبت نشده است.</div>';
+    }
+    setPropertyPrivateDocumentsStatus(statusMessage||`${toPersianDigits(String(documents.length))} مدرک خصوصی · فقط برای مدیر قابل مشاهده است.`);
+  } catch(error){
+    console.warn('Could not load private property documents:',error);
+    const currentPanel=document.getElementById('property-private-documents');
+    if(requestId!==propertyPrivateDocumentsRequestId||!canManagePrivatePropertyDocuments()||!currentPanel||String(currentPanel.dataset.propertyId)!==String(property.id)) return;
+    if(list) list.innerHTML='<div style="font-size:11px;color:var(--red);padding:8px 0;">فهرست مدارک خصوصی بارگذاری نشد.</div>';
+    setPropertyPrivateDocumentsStatus('مخزن خصوصی آماده نیست یا دسترسی مدیر هنوز فعال نشده است.',true);
+  }
+}
+
+async function uploadPropertyPrivateDocuments(input){
+  if(!canManagePrivatePropertyDocuments()||propertyPrivateDocumentsBusy||!input) return;
+  const panel=document.getElementById('property-private-documents');
+  const propertyId=String(panel?.dataset.propertyId||'');
+  const property=state.properties.find(item=>sameId(item.id,propertyId));
+  const files=Array.from(input.files||[]);
+  input.value='';
+  if(!panel||!property||!files.length) return;
+  if(files.length>PROPERTY_PRIVATE_DOCUMENT_MAX_BATCH){
+    setPropertyPrivateDocumentsStatus(`در هر نوبت حداکثر ${toPersianDigits(String(PROPERTY_PRIVATE_DOCUMENT_MAX_BATCH))} فایل انتخاب کنید.`,true);
+    return;
+  }
+  const folder=propertyPrivateDocumentFolder(property);
+  if(!folder){ setPropertyPrivateDocumentsStatus('شناسهٔ مالک این فایل در دسترس نیست.',true); return; }
+  const valid=[];
+  const rejected=[];
+  files.forEach(file=>{
+    const mime=propertyPrivateDocumentMime(file);
+    if(!mime) rejected.push(`${file.name}: فقط PDF و تصویرهای JPG، PNG، WebP و HEIC مجازند.`);
+    else if(file.size>PROPERTY_PRIVATE_DOCUMENT_MAX_BYTES) rejected.push(`${file.name}: حجم هر فایل نباید از ۲۰ مگابایت بیشتر باشد.`);
+    else valid.push({file,mime});
+  });
+  if(!valid.length){ setPropertyPrivateDocumentsStatus(rejected.slice(0,2).join(' '),true); return; }
+  propertyPrivateDocumentsBusy=true;
+  let uploaded=0;
+  const failures=rejected.slice();
+  try {
+    const storage=_supabase.storage.from(PROPERTY_PRIVATE_DOCUMENT_BUCKET);
+    for(let index=0;index<valid.length;index++){
+      const {file,mime}=valid[index];
+      setPropertyPrivateDocumentsStatus(`در حال بارگذاری مدرک ${toPersianDigits(String(index+1))} از ${toPersianDigits(String(valid.length))}…`);
+      const path=`${folder}/${crypto.randomUUID()}-${safePropertyPrivateDocumentName(file.name)}`;
+      const result=await storage.upload(path,file,{cacheControl:'0',upsert:false,contentType:mime});
+      if(result.error) failures.push(`${file.name}: ${result.error.message||'خطا در بارگذاری'}`);
+      else uploaded++;
+    }
+  } catch(error){
+    failures.push(error?.message||'خطا در بارگذاری مدارک');
+  } finally {
+    propertyPrivateDocumentsBusy=false;
+    const summary=uploaded&&failures.length?`${toPersianDigits(String(uploaded))} مدرک بارگذاری شد؛ ${toPersianDigits(String(failures.length))} مورد ذخیره نشد.`
+      :uploaded?`${toPersianDigits(String(uploaded))} مدرک خصوصی با موفقیت ذخیره شد.`
+      :failures.length?`بارگذاری انجام نشد: ${failures.slice(0,2).join(' ')}`:'';
+    await loadPropertyPrivateDocuments(property,summary);
+  }
+}
+
+async function downloadPropertyPrivateDocument(path,name){
+  if(!canManagePrivatePropertyDocuments()) return;
+  const panel=document.getElementById('property-private-documents');
+  const property=state.properties.find(item=>sameId(item.id,String(panel?.dataset.propertyId||'')));
+  const folder=propertyPrivateDocumentFolder(property);
+  const filePath=String(path||'');
+  if(!panel||!folder||!filePath.startsWith(folder+'/')) return;
+  setPropertyPrivateDocumentsStatus('در حال دریافت امن مدرک…');
+  try {
+    const result=await _supabase.storage.from(PROPERTY_PRIVATE_DOCUMENT_BUCKET).download(filePath);
+    if(result.error) throw result.error;
+    const objectUrl=URL.createObjectURL(result.data);
+    const anchor=document.createElement('a');
+    anchor.href=objectUrl;
+    anchor.download=safePropertyPrivateDocumentName(name||'document');
+    anchor.style.display='none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(()=>URL.revokeObjectURL(objectUrl),60000);
+    setPropertyPrivateDocumentsStatus('مدرک به‌صورت امن دریافت شد.');
+  } catch(error){
+    console.warn('Could not download private property document:',error);
+    setPropertyPrivateDocumentsStatus('دریافت مدرک انجام نشد؛ دسترسی مدیر و وضعیت مخزن را بررسی کنید.',true);
+  }
+}
+
+async function deletePropertyPrivateDocument(path,name){
+  if(!canManagePrivatePropertyDocuments()) return;
+  const panel=document.getElementById('property-private-documents');
+  const property=state.properties.find(item=>sameId(item.id,String(panel?.dataset.propertyId||'')));
+  const folder=propertyPrivateDocumentFolder(property);
+  const filePath=String(path||'');
+  if(!panel||!folder||!filePath.startsWith(folder+'/')) return;
+  if(!confirm(`مدرک خصوصی «${String(name||'مدرک').replace(/[\r\n]/g,' ').slice(0,100)}» حذف شود؟ این کار قابل بازگشت نیست.`)) return;
+  try {
+    const result=await _supabase.storage.from(PROPERTY_PRIVATE_DOCUMENT_BUCKET).remove([filePath]);
+    if(result.error) throw result.error;
+    await loadPropertyPrivateDocuments(property,'مدرک خصوصی حذف شد.');
+  } catch(error){
+    console.warn('Could not delete private property document:',error);
+    setPropertyPrivateDocumentsStatus('حذف مدرک انجام نشد؛ دسترسی مدیر و وضعیت مخزن را بررسی کنید.',true);
+  }
+}
+
 function openPropertyDetails(id){
   const p = state.properties.find(x => String(x.id) === String(id));
   if(!p) return;
@@ -4425,6 +4596,7 @@ function openPropertyDetails(id){
   const notes = p.notes ? `<div class="property-detail-section"><div class="property-detail-section-title">📝 توضیحات</div><div class="property-detail-notes">${propertyDetailValue(p.notes)}</div></div>` : '';
   const media = images.length ? `<div class="property-detail-section"><div class="property-detail-section-title">📸 تصاویر (${images.length})</div><div class="property-detail-media">${images.map((img,index) => `<img src="${safeURL(img.src)}" alt="${escapeHTML(img.name || title)}" title="برای بزرگ‌نمایی کلیک کنید" data-property-id="${escapeHTML(String(p.id))}" data-image-index="${index}" onclick="openPropertyLightbox(this.dataset.propertyId, this.dataset.imageIndex)">`).join('')}</div></div>` : '';
   const videos = (p.videos || []).filter(Boolean).length ? `<div class="property-detail-section"><div class="property-detail-section-title">🎬 ویدیوها</div>${p.videos.filter(Boolean).map(url => `<a href="${safeURL(url)}" target="_blank" rel="noopener noreferrer" class="property-detail-link">${escapeHTML(url)}</a>`).join('')}</div>` : '';
+  const privateDocumentsSection = canManagePrivatePropertyDocuments() ? `<div id="property-private-documents" class="property-detail-section" data-property-id="${escapeHTML(String(p.id))}"><div class="property-detail-section-title">🔒 مدارک خصوصی ملک</div><div style="font-size:11px;color:var(--text2);margin-bottom:10px;">سند، پروانه و عکس محرمانه را فقط در همین بخش بارگذاری کنید. تصاویر گالری عادی ملک جدا هستند و ممکن است طبق سطح دسترسی معمول برای مشاوران یا بازارگاه نمایش داده شوند؛ مخزن این بخش فقط برای مدیر فعال باز است.</div><div id="property-private-document-list" style="margin-bottom:8px;">در حال دریافت فهرست مدارک خصوصی…</div><input id="property-private-document-input" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif" multiple style="display:none;" onchange="uploadPropertyPrivateDocuments(this)"><label for="property-private-document-input" class="btn btn-primary btn-sm" style="display:inline-flex;cursor:pointer;">📎 افزودن مدرک خصوصی</label><div id="property-private-documents-status" role="status" aria-live="polite" style="font-size:11px;margin-top:8px;"></div></div>` : '';
   const editAction = `<div style="display:flex;justify-content:flex-start;flex-wrap:wrap;gap:8px;margin-top:16px;"><button class="btn btn-ghost" data-property-id="${escapeHTML(String(p.id))}" onclick="sharePropertyCard(this.dataset.propertyId)">📤 ساخت کارت اشتراک‌گذاری</button><button class="btn btn-primary" data-property-id="${escapeHTML(String(p.id))}" onclick="closeModal('property-details-modal'); openEditProperty(this.dataset.propertyId)">✏️ ویرایش ملک</button></div>`;
 
   document.getElementById('property-details-title').textContent = `🔎 جزئیات — ${title}`;
@@ -4434,9 +4606,10 @@ function openPropertyDetails(id){
     ${completenessSection}
     <div class="property-detail-section"><div class="property-detail-section-title">📋 اطلاعات اصلی</div><div class="property-detail-grid">${core || '<div class="property-detail-empty">اطلاعات اصلی ثبت نشده است</div>'}</div></div>
     ${extra ? `<div class="property-detail-section"><div class="property-detail-section-title">⚙️ مشخصات تکمیلی</div><div class="property-detail-grid">${extra}</div></div>` : ''}
-    ${notes}${media}${videos}${editAction}
+    ${notes}${media}${videos}${privateDocumentsSection}${editAction}
   `;
   openModal('property-details-modal');
+  if(canManagePrivatePropertyDocuments()) loadPropertyPrivateDocuments(p);
 }
 
 function propertyShareData(property){
