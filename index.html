@@ -1882,8 +1882,9 @@ function profileRef(id){
         </div>
           <div class="form-group">
             <label>شماره تماس مالک</label>
-            <input type="text" id="p-owner-phone" placeholder="09...">
+            <input type="text" id="p-owner-phone" placeholder="09..." oninput="renderPropertyOwnerPhoneDuplicateWarning()">
           </div>
+          <div id="p-owner-phone-duplicate-warning" class="form-group full" role="status" aria-live="polite" style="display:none;font-size:11px;line-height:1.8;padding:10px 12px;border:1px solid rgba(232,168,56,.4);border-radius:10px;background:rgba(232,168,56,.08);color:var(--text2);"></div>
           <div class="form-group full">
             <label>آدرس دقیق ملک</label>
             <input type="text" id="p-address" placeholder="استان، شهر، محله، خیابان و پلاک">
@@ -2134,8 +2135,9 @@ function profileRef(id){
       </div>
       <div class="form-group">
         <label>شماره موبایل</label>
-        <input type="text" id="c-phone" placeholder="09...">
+        <input type="text" id="c-phone" placeholder="09..." oninput="renderClientPhoneDuplicateWarning()">
       </div>
+      <div id="c-phone-duplicate-warning" class="form-group full" role="status" aria-live="polite" style="display:none;font-size:11px;line-height:1.8;padding:10px 12px;border:1px solid rgba(232,168,56,.4);border-radius:10px;background:rgba(232,168,56,.08);color:var(--text2);"></div>
       <div class="form-group">
         <label>نوع درخواست</label>
         <select id="c-request" onchange="updateClientFields()">
@@ -2707,6 +2709,64 @@ function safePhone(value){
   return escapeHTML(String(value ?? '').replace(/[^0-9+()\\-\\s]/g, ''));
 }
 
+function normalizePhoneForDuplicate(value){
+  const persianDigits='۰۱۲۳۴۵۶۷۸۹', arabicDigits='٠١٢٣٤٥٦٧٨٩';
+  let digits=String(value ?? '').replace(/[۰-۹٠-٩]/g, digit=>{
+    const persianIndex=persianDigits.indexOf(digit);
+    return String(persianIndex>=0?persianIndex:arabicDigits.indexOf(digit));
+  }).replace(/\D/g,'');
+  if(digits.startsWith('0098')&&digits.length>=14) digits='0'+digits.slice(4);
+  else if(digits.startsWith('98')&&digits.length>=12) digits='0'+digits.slice(2);
+  else if(digits.length===10&&digits.startsWith('9')) digits='0'+digits;
+  return digits.length>=8?digits:'';
+}
+
+function findDuplicateClientsByPhone(phoneValue,excludeId=''){
+  const key=normalizePhoneForDuplicate(phoneValue);
+  if(!key) return [];
+  return (state.clients||[]).filter(client=>
+    (!excludeId||!sameId(client.id,excludeId))&&normalizePhoneForDuplicate(client.phone)===key
+  );
+}
+
+function propertyOwnerPhoneValue(property){
+  return property?.ownerPhone||property?.extra?.['p-owner-phone']||'';
+}
+
+function findDuplicatePropertiesByOwnerPhone(phoneValue,excludeId=''){
+  const key=normalizePhoneForDuplicate(phoneValue);
+  if(!key) return [];
+  return (state.properties||[]).filter(property=>
+    (!excludeId||!sameId(property.id,excludeId))&&normalizePhoneForDuplicate(propertyOwnerPhoneValue(property))===key
+  );
+}
+
+function renderClientPhoneDuplicateWarning(){
+  const box=document.getElementById('c-phone-duplicate-warning');
+  if(!box) return [];
+  const phone=document.getElementById('c-phone')?.value||'';
+  const matches=findDuplicateClientsByPhone(phone,editingClientId);
+  if(!matches.length){ box.innerHTML=''; box.style.display='none'; return []; }
+  const rows=matches.slice(0,4).map(client=>`<li><strong>${escapeHTML(client.name||'مشتری بدون نام')}</strong>${client.request?` — ${escapeHTML(client.request)}`:''}</li>`).join('');
+  const more=matches.length>4?`<li>و ${toPersianDigits(String(matches.length-4))} پروندهٔ دیگر</li>`:'';
+  box.innerHTML=`⚠️ این شماره در ${toPersianDigits(String(matches.length))} پروندهٔ مشتریِ قابل‌مشاهده برای این حساب ثبت شده است. اگر همان شخص است، از ساخت پروندهٔ تکراری خودداری کنید.<ul style="margin:5px 0 0;padding-right:20px;">${rows}${more}</ul>`;
+  box.style.display='block';
+  return matches;
+}
+
+function renderPropertyOwnerPhoneDuplicateWarning(){
+  const box=document.getElementById('p-owner-phone-duplicate-warning');
+  if(!box) return [];
+  const phone=document.getElementById('p-owner-phone')?.value||'';
+  const matches=findDuplicatePropertiesByOwnerPhone(phone,editingPropertyId);
+  if(!matches.length){ box.innerHTML=''; box.style.display='none'; return []; }
+  const rows=matches.slice(0,4).map(property=>`<li>${escapeHTML(String(property.title||'ملک بدون عنوان').replace(/\s+/g,' ').slice(0,90))}</li>`).join('');
+  const more=matches.length>4?`<li>و ${toPersianDigits(String(matches.length-4))} فایل دیگر</li>`:'';
+  box.innerHTML=`⚠️ شمارهٔ تماس این مالک در ${toPersianDigits(String(matches.length))} فایلِ قابل‌مشاهدهٔ دیگر هم ثبت شده است. ممکن است یک مالک چند ملک داشته باشد؛ عنوان فایل‌ها را بررسی کنید.<ul style="margin:5px 0 0;padding-right:20px;">${rows}${more}</ul>`;
+  box.style.display='block';
+  return matches;
+}
+
 // save a single record to Supabase
 async function _saveDoc(col, data){
   if(!isAdmin() && !ADVISOR_ALLOWED_COLLECTIONS.has(col)) throw new Error('این عملیات فقط برای مدیر مجاز است');
@@ -3169,6 +3229,7 @@ function resetPropertyForm(){
     if(el.type === 'checkbox') el.checked = false;
     else el.value = '';
   });
+  renderPropertyOwnerPhoneDuplicateWarning();
   resetMediaInputs();
   backToPropStep1();
   const heading = document.querySelector('#prop-modal .modal-title');
@@ -3240,6 +3301,7 @@ function openNewClientModal(){
   setFieldValue('c-priority','mid'); setFieldValue('c-area',''); setFieldValue('c-source',''); setFieldValue('c-notes','');
   setFieldValue('c-reminder-enabled', false);
   updateClientFields('', false);
+  renderClientPhoneDuplicateWarning();
   const heading = document.querySelector('#client-modal .modal-title');
   if(heading) heading.textContent = '👤 ثبت مشتری جدید';
   const saveButton = document.querySelector('#client-modal .form-actions .btn-primary');
@@ -4886,12 +4948,13 @@ function openEditProperty(id){
   setFieldValue('p-mortgage', p.mortgage || '');
   setFieldValue('p-rent', p.rent || '');
   setFieldValue('p-owner-name', p.ownerName || '');
-  setFieldValue('p-owner-phone', p.ownerPhone || '');
+  setFieldValue('p-owner-phone', p.ownerPhone || p.extra?.['p-owner-phone'] || '');
   setFieldValue('p-address', p.address || '');
   setFieldValue('p-lat', p.lat ?? '');
   setFieldValue('p-lng', p.lng ?? '');
   setFieldValue('p-notes', p.notes || '');
   Object.entries(p.extra || {}).forEach(([key, value]) => setFieldValue(key, value));
+  renderPropertyOwnerPhoneDuplicateWarning();
   updatePriceFields();
   propertyImageReadGeneration++;
   propertyImageReadFailures=[];
@@ -4912,6 +4975,13 @@ function openEditProperty(id){
 }
 
 async function saveProperty(){
+  if(propertySaveInProgress) return;
+  const duplicateOwnerProperties=findDuplicatePropertiesByOwnerPhone(gVal('p-owner-phone'),editingPropertyId);
+  if(duplicateOwnerProperties.length){
+    const summary=duplicateOwnerProperties.slice(0,4).map(property=>`• ${String(property.title||'ملک بدون عنوان').replace(/\s+/g,' ').slice(0,80)}`).join('\n');
+    const more=duplicateOwnerProperties.length>4?`\nو ${toPersianDigits(String(duplicateOwnerProperties.length-4))} فایل دیگر`:'';
+    if(!confirm(`شماره تماس این مالک در ${toPersianDigits(String(duplicateOwnerProperties.length))} فایل دیگر ثبت شده است:\n${summary}${more}\nیک مالک ممکن است چند ملک داشته باشد؛ اگر مطمئن هستید این فایل جداگانه است، ذخیره ادامه یابد؟`)) return;
+  }
   const isCustomer = currentUser?.role === 'customer';
   let title = document.getElementById('p-title').value.trim();
   if(!title){
@@ -5619,6 +5689,7 @@ function openEditClient(id){
   clientDynamicFieldCache = Object.fromEntries(Object.entries(c.dynFields || {}).map(([key,value]) => [`c-${key}`,value]));
   setFieldValue('c-name', c.name || '');
   setFieldValue('c-phone', c.phone || '');
+  renderClientPhoneDuplicateWarning();
   setFieldValue('c-request', c.request || 'خرید');
   setFieldValue('c-priority', c.priority || 'mid');
   setFieldValue('c-area', c.area || '');
@@ -5637,6 +5708,12 @@ function openEditClient(id){
 async function saveClient(){
   const name = document.getElementById('c-name').value.trim();
   if(!name){ notify('نام مشتری را وارد کنید','var(--red)'); return; }
+  const duplicateClients=renderClientPhoneDuplicateWarning();
+  if(duplicateClients.length){
+    const summary=duplicateClients.slice(0,4).map(client=>`• ${String(client.name||'مشتری بدون نام').replace(/\s+/g,' ').slice(0,60)}${client.request?` — ${String(client.request).replace(/\s+/g,' ').slice(0,30)}`:''}`).join('\n');
+    const more=duplicateClients.length>4?`\nو ${toPersianDigits(String(duplicateClients.length-4))} پروندهٔ دیگر`:'';
+    if(!confirm(`این شماره در ${toPersianDigits(String(duplicateClients.length))} پروندهٔ مشتری دیگر ثبت شده است:\n${summary}${more}\nاگر همان شخص است، پروندهٔ موجود را ویرایش کنید. آیا مطمئن هستید می‌خواهید مشتری جدیدی با همین شماره ثبت کنید؟`)) return;
+  }
   const dynFields = Object.fromEntries(Object.entries(clientDynamicFieldCache).map(([id,value]) => [id.replace(/^c-/, ''),value]));
   document.querySelectorAll('#c-dynamic-fields input, #c-dynamic-fields select, #c-dynamic-fields textarea').forEach(el => {
     if(el.id) dynFields[el.id.replace(/^c-/, '')] = el.value;
