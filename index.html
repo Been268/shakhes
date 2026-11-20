@@ -1292,12 +1292,12 @@ function profileRef(id){
           <div class="stat-value" id="dash-clients">0</div>
           <div class="stat-change">در انتظار پیگیری</div>
         </div>
-        <div class="stat-card blue">
+        <div class="stat-card blue" data-admin-only="true">
           <div class="stat-label">معاملات انجام شده</div>
           <div class="stat-value" id="dash-deals">0</div>
           <div class="stat-change">در این ماه</div>
         </div>
-        <div class="stat-card purple">
+        <div class="stat-card purple" data-admin-only="true">
           <div class="stat-label">کمیسیون کل</div>
           <div class="stat-value" id="dash-commission">۰</div>
           <div class="stat-change">تومان</div>
@@ -1476,7 +1476,7 @@ function profileRef(id){
     </div>
 
     <!-- Deals -->
-    <div class="page" id="page-deals">
+    <div class="page" id="page-deals" data-admin-only="true">
       <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
         <button class="btn btn-primary" onclick="openNewDealModal()">➕ معامله جدید</button>
       </div>
@@ -2246,7 +2246,7 @@ function profileRef(id){
 </div>
 
 <!-- Deal Modal -->
-<div class="modal-overlay" id="deal-modal">
+<div class="modal-overlay" id="deal-modal" data-admin-only="true">
   <div class="modal">
     <div class="modal-title">📋 ثبت معامله جدید</div>
     <div class="form-grid">
@@ -2306,7 +2306,7 @@ function profileRef(id){
 </div>
 
 <!-- Deal Details Modal -->
-<div class="modal-overlay" id="deal-details-modal">
+<div class="modal-overlay" id="deal-details-modal" data-admin-only="true">
   <div class="modal" style="width:760px;max-width:96vw;">
     <div class="modal-title" id="deal-details-title">📋 جزئیات معامله</div>
     <div id="deal-details-content"></div>
@@ -2651,14 +2651,14 @@ async function loadUserState(){
     state.clientActivities = clientActivities;
   } else {
     // مشاور فقط داده‌های عملیاتی مجاز خودش را می‌خواند؛ اطلاعات تلگرام و حسابداری آژانس مدیریتی هستند.
-    const [props, clients, deals, reminders, followups, priceHistory, clientActivities] = await Promise.all([
-      loadCol('properties'), loadCol('clients'), loadCol('deals'),
+    const [props, clients, reminders, followups, priceHistory, clientActivities] = await Promise.all([
+      loadCol('properties'), loadCol('clients'),
       loadCol('reminders'), loadCol('followups'), loadCol('priceHistory'), loadCol('clientActivities')
     ]);
     state.properties  = await refreshSignedPropertyImages(props);
     state.clients     = clients;
     state.advisors    = [];
-    state.deals       = await refreshSignedDealAttachments(deals);
+    state.deals       = [];
     state.tgPosts     = [];
     state.reminders   = reminders;
     state.followups   = followups;
@@ -2915,12 +2915,15 @@ function renderProfilePage(){
   const myClients = state.clients.length;
   const myDeals   = state.deals.length;
   const myComm    = state.deals.reduce((s,d) => s+(parseFloat(d.commission)||0), 0);
+  const dealStats = isAdmin() ? `
+      <div class="admin-stat"><div class="admin-stat-val" style="color:var(--green)">${myDeals}</div><div class="admin-stat-lbl">معامله</div></div>
+      <div class="admin-stat"><div class="admin-stat-val" style="color:var(--accent)">${myComm>0?moneyHTML(Math.round(myComm)):'۰'}</div><div class="admin-stat-lbl">کمیسیون (تومان)</div></div>
+    ` : '';
   document.getElementById('my-stats-box').innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;">
       <div class="admin-stat"><div class="admin-stat-val" style="color:var(--blue)">${myProps}</div><div class="admin-stat-lbl">ملک ثبت شده</div></div>
       <div class="admin-stat"><div class="admin-stat-val" style="color:var(--purple)">${myClients}</div><div class="admin-stat-lbl">مشتری</div></div>
-      <div class="admin-stat"><div class="admin-stat-val" style="color:var(--green)">${myDeals}</div><div class="admin-stat-lbl">معامله</div></div>
-      <div class="admin-stat"><div class="admin-stat-val" style="color:var(--accent)">${myComm>0?moneyHTML(Math.round(myComm)):'۰'}</div><div class="admin-stat-lbl">کمیسیون (تومان)</div></div>
+      ${dealStats}
     </div>
   `;
 }
@@ -2973,14 +2976,19 @@ let state = {
 };
 
 // Navigation and role access
-const ADMIN_ONLY_PAGES = new Set(['advisors','admin','telegram','accounting','reports']);
+const ADMIN_ONLY_PAGES = new Set(['advisors','admin','telegram','accounting','reports','deals']);
 const CUSTOMER_ONLY_PAGES = new Set(['customer-marketplace','customer-requests']);
-const ADVISOR_ALLOWED_COLLECTIONS = new Set(['properties','clients','deals','reminders','followups','priceHistory','clientActivities']);
+const ADVISOR_ALLOWED_COLLECTIONS = new Set(['properties','clients','reminders','followups','priceHistory','clientActivities']);
 function clearPrivateSessionState(){
   if(typeof state === 'undefined' || !state) return;
   Object.assign(state,{properties:[],marketplace:[],clients:[],advisors:[],allUsers:[],advisorRequests:[],customerRequests:[],deals:[],clientActivities:[],tgPosts:[],reminders:[],followups:[],priceHistory:[],accounting:[]});
 }
 function isAdmin(){ return !!currentUser && currentUser.role === 'admin'; }
+function requireAdminDealAccess(){
+  if(isAdmin()) return true;
+  if(currentUser) notify('دسترسی به معاملات فقط برای مدیر دفتر مجاز است','var(--red)');
+  return false;
+}
 function canAccessPage(name){
   if(!currentUser) return false;
   if(CUSTOMER_ONLY_PAGES.has(name)) return currentUser.role === 'customer';
@@ -3257,11 +3265,13 @@ function populateDealClientOptions(selectedId=''){
   select.value = String(selectedId || '');
 }
 function openDealFromClient(button){
+  if(!requireAdminDealAccess()) return;
   const clientId = button?.dataset?.clientId || '';
   closeModal('client-details-modal');
   openNewDealModal(clientId);
 }
 function openNewDealModal(clientId=''){
+  if(!requireAdminDealAccess()) return;
   editingDealId = null;
   resetDealAttachments();
   setFieldValue('d-title',''); setFieldValue('d-type','فروش'); setFieldValue('d-price',''); setFieldValue('d-commission',''); setFieldValue('d-advisor',''); setFieldValue('d-date',toPersianDigits(siteToday()));
@@ -3313,6 +3323,7 @@ function openNewClientModal(){
 function openModal(id){
   const modal = document.getElementById(id);
   if(!modal) return;
+  if((id==='deal-modal'||id==='deal-details-modal')&&!requireAdminDealAccess()) return;
   // بعض مودال‌های قدیمی مستقیماً .modal هستند و inline display:none دارند؛
   // فقط افزودن کلاس open برای آن‌ها کافی نیست.
   modal.classList.add('open');
@@ -5803,7 +5814,7 @@ function openClientDetails(id){
     ? `<button class="btn btn-ghost btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="toggleClientReminder(this.dataset.clientId, false); closeModal('client-details-modal')">🔕 خاموش کردن یادآوری</button>`
     : `<button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="toggleClientReminder(this.dataset.clientId, true); closeModal('client-details-modal')">🔔 فعال کردن یادآوری</button>`;
   const editAction = `<button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="closeModal('client-details-modal'); openEditClient(this.dataset.clientId)">✏️ ویرایش مشتری</button>`;
-  const dealAction = `<button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="openDealFromClient(this)">📋 ثبت معامله</button>`;
+  const dealAction = isAdmin() ? `<button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="openDealFromClient(this)">📋 ثبت معامله</button>` : '';
 
   document.getElementById('client-details-title').textContent = `🔎 جزئیات مشتری — ${c.name || 'بدون نام'}`;
   document.getElementById('client-details-content').innerHTML = `
@@ -6259,6 +6270,7 @@ async function deleteAdvisor(id){
 
 // --- DEALS ---
 function openEditDeal(id){
+  if(!requireAdminDealAccess()) return;
   const d = state.deals.find(item => sameId(item.id, id));
   if(!d) return;
   editingDealId = String(d.id);
@@ -6402,6 +6414,7 @@ function dealGalleryHTML(label,items){
 }
 
 async function openDealDetails(id){
+  if(!requireAdminDealAccess()) return;
   const deal=state.deals.find(item=>sameId(item.id,id));
   if(!deal) return;
   const title=document.getElementById('deal-details-title');
@@ -6426,6 +6439,7 @@ async function openDealDetails(id){
 }
 
 async function saveDeal(){
+  if(!requireAdminDealAccess()) return;
   const title = document.getElementById('d-title').value.trim();
   const dateInput = document.getElementById('d-date').value.trim();
   const date = normalizeSiteDate(dateInput);
@@ -6512,6 +6526,7 @@ async function saveDeal(){
 
 function renderDeals(){
   const el = document.getElementById('deals-table');
+  if(!isAdmin()){ if(el) el.innerHTML=''; return; }
   if(!state.deals.length){ el.innerHTML='<div class="empty-state"><div class="icon">📋</div><p>هنوز معامله‌ای ثبت نشده</p></div>'; return; }
   el.innerHTML = `<table><thead><tr><th>عنوان</th><th>مشتری مرتبط</th><th>نوع</th><th>قیمت نهایی</th><th>کمیسیون</th><th>مشاور</th><th>تاریخ</th><th>عملیات</th></tr></thead><tbody>
   ${state.deals.map(d=>`<tr>
@@ -6532,6 +6547,7 @@ function renderDeals(){
 }
 
 async function deleteDeal(id){
+  if(!requireAdminDealAccess()) return;
   const deal = state.deals.find(item => sameId(item.id, id));
   if(!deal) return;
   const ownerUid = recordOwnerForCurrentView(deal, currentUser.id);
