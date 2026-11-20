@@ -1684,7 +1684,9 @@ function profileRef(id){
       <div style="margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
         <div class="card-title" style="flex:1;">📊 گزارش‌ها و آمار</div>
         <button class="btn btn-ghost" onclick="exportExcel()">📥 خروجی اکسل</button>
+        <button class="btn btn-primary" data-admin-only="true" onclick="exportFullBackup(this)" title="پشتیبان JSON شامل ملک‌ها، مشتریان، معاملات و داده‌های عملیاتی">🗄️ پشتیبان کامل JSON</button>
       </div>
+      <div style="font-size:12px;color:var(--text2);margin:-6px 0 16px;">پشتیبان کامل فقط برای مدیر دفتر است. فایل شامل اطلاعات حساس است؛ آن را امن نگه دارید. عکس‌ها و سندهای باینری در این خروجی نیستند.</div>
 
       <!-- نمودارها -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
@@ -7503,6 +7505,71 @@ function exportExcel(){
   a.href = url; a.download = 'املاک-شاخص-'+new Date().toLocaleDateString('fa-IR')+'.csv';
   a.click(); URL.revokeObjectURL(url);
   notify('فایل اکسل دانلود شد ✅');
+}
+
+async function exportFullBackup(button){
+  if(!isAdmin()){
+    notify('پشتیبان کامل فقط در دسترس مدیر دفتر است','var(--red)');
+    return;
+  }
+  const adminId = currentUser.id;
+  if(button){ button.disabled=true; button.textContent='⏳ آماده‌سازی پشتیبان...'; }
+  try{
+    await loadUserState();
+  }catch(error){
+    console.error('Could not refresh data for full backup:',error);
+    notify('دریافت تازهٔ اطلاعات ناموفق بود؛ فایل پشتیبان ساخته نشد','var(--red)');
+    return;
+  }finally{
+    if(button){ button.disabled=false; button.textContent='🗄️ پشتیبان کامل JSON'; }
+  }
+  if(!isAdmin() || !currentUser || String(currentUser.id)!==String(adminId)){
+    notify('نشست مدیر تغییر کرده است؛ دوباره وارد شوید','var(--red)');
+    return;
+  }
+  const collectionNames = [
+    'properties','clients','deals','reminders','followups','priceHistory',
+    'clientActivities','accounting','tgPosts'
+  ];
+  const collections = {};
+  const counts = {};
+  collectionNames.forEach(name=>{
+    collections[name] = Array.isArray(state[name]) ? state[name] : [];
+    counts[name] = collections[name].length;
+  });
+  const totalRecords = Object.values(counts).reduce((sum,count)=>sum+count,0);
+  const confirmation = [
+    'این فایل پشتیبان شامل اطلاعات حساس ملک‌ها، مشتریان، معاملات و داده‌های عملیاتی دفتر است.',
+    'فایل را فقط در محل امن ذخیره کنید و برای افراد غیرمجاز نفرستید.',
+    'عکس‌ها و سندهای باینری در فایل قرار نمی‌گیرند؛ همهٔ فیلدهای URL و کلیدهای محرمانه حذف می‌شوند.',
+    `تعداد رکوردها: ${totalRecords}`,
+    'آیا پشتیبان JSON دانلود شود؟'
+  ].join('\n\n');
+  if(!window.confirm(confirmation)) return;
+
+  const backup = {
+    format: 'shakhes-full-backup',
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    exportedBy: {id: currentUser.id, role: currentUser.role},
+    contents: collections,
+    counts
+  };
+  const json = JSON.stringify(backup,(key,value)=>{
+    if(/(?:token|password|secret|credential|api[_-]?key)/i.test(String(key))) return undefined;
+    if(/url/i.test(String(key))) return undefined;
+    return value;
+  },2);
+  const blob = new Blob([json],{type:'application/json;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `shakhes-backup-${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  notify('فایل پشتیبان کامل دانلود شد ✅');
 }
 
 // ════════════════════════════════════════════════
