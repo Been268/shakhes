@@ -1433,6 +1433,7 @@ function profileRef(id){
         <button class="btn btn-ghost" onclick="copyCustomerSignupLink()">🔗 کپی لینک ثبت‌نام مشتری</button>
         <button class="btn btn-primary" onclick="openNewClientModal()">➕ مشتری جدید</button>
       </div>
+      <div id="client-access-controls"></div>
       <div class="card">
         <div class="card-body" id="clients-table">
           <div class="empty-state"><div class="icon">👥</div><p>هنوز مشتری‌ای ثبت نشده</p></div>
@@ -1749,6 +1750,20 @@ function profileRef(id){
         <div class="card-body" id="admin-pending-list" style="padding:16px;">
           <div class="empty-state"><div class="icon">✅</div><p>درخواست جدیدی وجود ندارد</p></div>
         </div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-header">
+          <div class="card-title">🔐 درخواست دسترسی به پروندهٔ مشتریان</div>
+          <button class="btn btn-ghost btn-sm" onclick="renderAdminPage()">↻ به‌روزرسانی</button>
+        </div>
+        <div class="card-body" id="admin-client-access-requests" style="padding:16px;">
+          <div class="empty-state"><div class="icon">🔐</div><p>درخواستی وجود ندارد</p></div>
+        </div>
+      </div>
+      <div class="card" id="admin-client-access-history-card" style="display:none;margin-bottom:20px;">
+        <div class="card-header"><div class="card-title" id="admin-client-access-history-title">🕘 تاریخچهٔ دسترسی</div></div>
+        <div class="card-body" id="admin-client-access-history" style="padding:16px;"></div>
       </div>
 
       <!-- All users -->
@@ -2415,6 +2430,8 @@ async function showApp(loadSequence=authLoadSequence){
   document.getElementById('client-count').textContent = '...';
   await loadUserState();
   if(loadSequence !== authLoadSequence || !currentUser){ clearPrivateSessionState(); return; }
+  if(currentUser.role === 'advisor') await loadClientAccessInbox();
+  if(loadSequence !== authLoadSequence || !currentUser){ clearPrivateSessionState(); return; }
   if(currentUser.role !== 'customer'){
     await loadChatContacts();
     if(loadSequence !== authLoadSequence || !currentUser){ clearPrivateSessionState(); return; }
@@ -2615,6 +2632,11 @@ async function loadUserState(){
     return q.docs.map(d => ({ ...d.data(), id: d.id }));
   }
 
+  async function loadVisibleClientRecords(col){
+    const rows=await fetchAll(_supabase.from('app_records').select('owner_id,record_id,payload').eq('collection_name',col));
+    return rows.map(row=>({...row.payload,id:row.record_id,_uid:row.owner_id}));
+  }
+
   if(currentUser.role === 'admin'){
     // admin: load ALL users' data
     const usersSnap = await backend().getDocs(backend().collection(backend().db, 'users'));
@@ -2654,8 +2676,8 @@ async function loadUserState(){
   } else {
     // مشاور فقط داده‌های عملیاتی مجاز خودش را می‌خواند؛ اطلاعات تلگرام و حسابداری آژانس مدیریتی هستند.
     const [props, clients, reminders, followups, priceHistory, clientActivities] = await Promise.all([
-      loadCol('properties'), loadCol('clients'),
-      loadCol('reminders'), loadCol('followups'), loadCol('priceHistory'), loadCol('clientActivities')
+      loadCol('properties'), loadVisibleClientRecords('clients'),
+      loadCol('reminders'), loadVisibleClientRecords('followups'), loadCol('priceHistory'), loadVisibleClientRecords('clientActivities')
     ]);
     state.properties  = await refreshSignedPropertyImages(props);
     state.clients     = clients;
@@ -2723,11 +2745,11 @@ function normalizePhoneForDuplicate(value){
   return digits.length>=8?digits:'';
 }
 
-function findDuplicateClientsByPhone(phoneValue,excludeId=''){
+function findDuplicateClientsByPhone(phoneValue,excludeId='',excludeOwnerId=''){
   const key=normalizePhoneForDuplicate(phoneValue);
   if(!key) return [];
   return (state.clients||[]).filter(client=>
-    (!excludeId||!sameId(client.id,excludeId))&&normalizePhoneForDuplicate(client.phone)===key
+    (!(excludeId&&sameId(client.id,excludeId)&&(!excludeOwnerId||clientOwnerId(client)===String(excludeOwnerId))))&&normalizePhoneForDuplicate(client.phone)===key
   );
 }
 
@@ -2747,7 +2769,7 @@ function renderClientPhoneDuplicateWarning(){
   const box=document.getElementById('c-phone-duplicate-warning');
   if(!box) return [];
   const phone=document.getElementById('c-phone')?.value||'';
-  const matches=findDuplicateClientsByPhone(phone,editingClientId);
+  const matches=findDuplicateClientsByPhone(phone,editingClientId,editingClientOwnerUid);
   if(!matches.length){ box.innerHTML=''; box.style.display='none'; return []; }
   const rows=matches.slice(0,4).map(client=>`<li><strong>${escapeHTML(client.name||'مشتری بدون نام')}</strong>${client.request?` — ${escapeHTML(client.request)}`:''}</li>`).join('');
   const more=matches.length>4?`<li>و ${toPersianDigits(String(matches.length-4))} پروندهٔ دیگر</li>`:'';
@@ -2826,6 +2848,15 @@ async function renderAdminPage(){
     const usersSnap = await backend().getDocs(backend().collection(backend().db, 'users'));
     const users = usersSnap.docs.map(d => ({ ...d.data(), id: d.id }));
     state.allUsers = users;
+    const [accessRequestsResult,accessPermissionsResult,accessNotificationsResult]=await Promise.all([
+      fetchAll(_supabase.from('client_access_requests').select('id,requester_id,target_name,target_phone,reason,client_owner_id,client_record_id,status,created_at,decided_at,decided_by,decision_note,revoked_at,revoked_by').order('created_at',{ascending:false})),
+      fetchAll(_supabase.from('advisor_access_permissions').select('advisor_id,permission_key,granted,changed_at,changed_by')),
+      fetchAll(_supabase.from('client_access_notifications').select('id,request_id,event_type,created_at,read_at').order('created_at',{ascending:false}).limit(100))
+    ]);
+    state.clientAccessRequests=accessRequestsResult;
+    state.advisorAccessPermissions=accessPermissionsResult;
+    state.clientAccessNotifications=accessNotificationsResult;
+    renderAdminClientAccess();
     const advisors = users.filter(u => u.role === 'advisor');
     const customers = users.filter(u => u.role === 'customer');
     const pending = users.filter(u => u.status === 'pending');
@@ -2854,14 +2885,17 @@ async function renderAdminPage(){
     </div>`).join('') : '<div class="empty-state"><div class="icon">✅</div><p>درخواست جدیدی وجود ندارد</p></div>';
 
     const allEl=document.getElementById('admin-users-list');
-    allEl.innerHTML=users.length?`<div style="overflow-x:auto;"><table><thead><tr><th>نام</th><th>ایمیل</th><th>موبایل</th><th>نقش</th><th>تاریخ عضویت</th><th>ملک</th><th>مشتری</th><th>معامله</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>
+    allEl.innerHTML=users.length?`<div style="overflow-x:auto;"><table><thead><tr><th>نام</th><th>ایمیل</th><th>موبایل</th><th>نقش</th><th>تاریخ عضویت</th><th>ملک</th><th>مشتری</th><th>معامله</th><th>وضعیت</th><th>مجوز مشاهدهٔ کامل مشتریان</th><th>تاریخچهٔ دسترسی</th><th>عملیات</th></tr></thead><tbody>
       ${users.map(u=>{
         const uProps=state.properties.filter(p=>p._uid===u.id||p.userId===u.id).length;
         const uClients=state.clients.filter(c=>c._uid===u.id||c.userId===u.id).length;
         const uDeals=state.deals.filter(d=>d._uid===u.id||d.userId===u.id).length;
+        const canViewAll=(state.advisorAccessPermissions||[]).some(p=>String(p.advisor_id)===String(u.id)&&p.permission_key==='view_all_client_information'&&p.granted===true);
+        const clientAccessControl=u.role==='advisor'?`<div style="font-size:10px;color:var(--text2);margin-bottom:5px;">${canViewAll?'دسترسی کاملِ فقط‌خواندنی فعال':'فقط پرونده‌های خودش و موارد تأییدشده'}</div><button class="btn ${canViewAll?'btn-danger':'btn-primary'} btn-sm" data-user-id="${escapeHTML(u.id)}" data-granted="${canViewAll?'false':'true'}" onclick="setAdvisorClientPermission(this.dataset.userId,this.dataset.granted==='true')">${canViewAll?'برداشتن دسترسی':'دادن دسترسی'}</button>`:'—';
+        const historyControl=u.role==='advisor'?`<button class="btn btn-ghost btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="openAdvisorClientAccessHistory(this.dataset.userId)">مشاهدهٔ تاریخچه</button>`:'—';
         const roleControl=u.is_primary_admin?'<span class="badge badge-gold">👑 مدیر اصلی · قفل</span>':`<select data-user-id="${escapeHTML(u.id)}" aria-label="نقش ${escapeHTML(u.fullname||'کاربر')}" onchange="changeUserRole(this.dataset.userId,this.value)"><option value="admin" ${u.role==='admin'?'selected':''}>مدیر</option><option value="advisor" ${u.role==='advisor'?'selected':''}>مشاور</option><option value="customer" ${u.role==='customer'?'selected':''}>مشتری</option></select>`;
         const actions=u.is_primary_admin?'<span style="color:var(--text3);font-size:11px;">حساب محافظت‌شده</span>':(u.status==='active'?`<button class="btn btn-danger btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="disableUser(this.dataset.userId)">🚫 غیرفعال</button>`:`<button class="btn btn-primary btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="approveUser(this.dataset.userId)">${u.status==='disabled'?'✅ فعال':'✅ تأیید'}</button>`);
-        return `<tr><td><b>${escapeHTML(u.fullname||'بدون نام')}</b></td><td>${escapeHTML(u.email||'—')}</td><td>${escapeHTML(u.phone||'—')}</td><td>${roleControl}</td><td>${escapeHTML(u.joinDate||'—')}</td><td>${uProps}</td><td>${uClients}</td><td>${uDeals}</td><td>${statusLabel[u.status]||escapeHTML(u.status||'—')}</td><td style="display:flex;gap:6px;align-items:center;">${actions}${u.is_primary_admin?'':`<button class="btn btn-ghost btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="resetUserPass(this.dataset.userId)" title="بازنشانی رمز">🔑</button>`}</td></tr>`;
+        return `<tr><td><b>${escapeHTML(u.fullname||'بدون نام')}</b></td><td>${escapeHTML(u.email||'—')}</td><td>${escapeHTML(u.phone||'—')}</td><td>${roleControl}</td><td>${escapeHTML(u.joinDate||'—')}</td><td>${uProps}</td><td>${uClients}</td><td>${uDeals}</td><td>${statusLabel[u.status]||escapeHTML(u.status||'—')}</td><td>${clientAccessControl}</td><td>${historyControl}</td><td style="display:flex;gap:6px;align-items:center;">${actions}${u.is_primary_admin?'':`<button class="btn btn-ghost btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="resetUserPass(this.dataset.userId)" title="بازنشانی رمز">🔑</button>`}</td></tr>`;
       }).join('')}</tbody></table></div>`:'<div class="empty-state"><div class="icon">👥</div><p>کاربری ثبت‌نام نکرده است</p></div>';
   } catch(error) {
     console.error('Could not render admin users:',error);
@@ -2968,6 +3002,10 @@ let state = {
   advisors: [],
   allUsers: [],
   advisorRequests: [],
+  clientAccessRequests: [],
+  advisorAccessPermissions: [],
+  clientAccessNotifications: [],
+  clientAccessAudit: [],
   customerRequests: [],
   deals: [],
   clientActivities: [],
@@ -2983,7 +3021,16 @@ const CUSTOMER_ONLY_PAGES = new Set(['customer-marketplace','customer-requests']
 const ADVISOR_ALLOWED_COLLECTIONS = new Set(['properties','clients','reminders','followups','priceHistory','clientActivities']);
 function clearPrivateSessionState(){
   if(typeof state === 'undefined' || !state) return;
-  Object.assign(state,{properties:[],marketplace:[],clients:[],advisors:[],allUsers:[],advisorRequests:[],customerRequests:[],deals:[],clientActivities:[],tgPosts:[],reminders:[],followups:[],priceHistory:[],accounting:[]});
+  Object.assign(state,{properties:[],marketplace:[],clients:[],advisors:[],allUsers:[],advisorRequests:[],clientAccessRequests:[],advisorAccessPermissions:[],clientAccessNotifications:[],clientAccessAudit:[],customerRequests:[],deals:[],clientActivities:[],tgPosts:[],reminders:[],followups:[],priceHistory:[],accounting:[]});
+  if(typeof editingClientId!=='undefined') editingClientId=null;
+  if(typeof editingClientOwnerUid!=='undefined') editingClientOwnerUid=null;
+  if(typeof editingFollowupId!=='undefined') editingFollowupId=null;
+  if(typeof editingFollowupOwnerUid!=='undefined') editingFollowupOwnerUid=null;
+  document.getElementById('client-details-modal')?.classList.remove('open');
+  document.getElementById('client-modal')?.classList.remove('open');
+  document.getElementById('followup-modal')?.classList.remove('open');
+  const details=document.getElementById('client-details-content');
+  if(details) details.innerHTML='';
 }
 function isAdmin(){ return !!currentUser && currentUser.role === 'admin'; }
 function requireAdminDealAccess(){
@@ -3167,6 +3214,235 @@ async function updateAdvisorRequestStatus(requestId,status){
   try{ const {error}=await _supabase.rpc('advisor_update_request_status',{p_request_id:requestId,p_status:status}); if(error) throw error; notify('وضعیت درخواست ذخیره شد ✅'); await renderAdvisorRequests(); }
   catch(error){ notify('به‌روزرسانی انجام نشد: '+error.message,'var(--red)'); }
 }
+
+const CLIENT_ACCESS_STATUS_LABELS={pending:'در انتظار تصمیم مدیر',approved:'تأیید شده · دسترسی فعال',denied:'رد شده',revoked:'دسترسی لغو شده'};
+const CLIENT_ACCESS_EVENT_LABELS={request_submitted:'درخواست دسترسی ثبت شد',request_approved:'درخواست دسترسی تأیید شد',request_denied:'درخواست دسترسی رد شد',access_revoked:'دسترسی مشتری لغو شد',permission_granted:'دسترسی دیدن همهٔ اطلاعات مشتریان داده شد',permission_revoked:'دسترسی دیدن همهٔ اطلاعات مشتریان برداشته شد'};
+const CLIENT_ACCESS_ACTION_LABELS={request_submitted:'ثبت درخواست',request_approved:'تأیید درخواست',request_denied:'رد درخواست',access_revoked:'لغو دسترسی',permission_granted:'دادن دسترسی سراسری',permission_revoked:'برداشتن دسترسی سراسری'};
+function clientAccessDate(value){
+  if(!value) return '—';
+  const date=new Date(value);
+  return Number.isNaN(date.getTime())?'—':date.toLocaleString('fa-IR',{dateStyle:'short',timeStyle:'short'});
+}
+function clientOwnerId(client){ return String(client?._uid||client?.userId||currentUser?.id||''); }
+function clientRecordRef(client){ return `${encodeURIComponent(clientOwnerId(client))}::${encodeURIComponent(String(client?.id??''))}`; }
+function findClientRecord(ref){
+  const value=String(ref??'');
+  const split=value.indexOf('::');
+  if(split>=0){
+    try{
+      const owner=decodeURIComponent(value.slice(0,split));
+      const id=decodeURIComponent(value.slice(split+2));
+      return (state.clients||[]).find(item=>String(item.id)===id&&clientOwnerId(item)===owner)||null;
+    }catch(error){ return null; }
+  }
+  const matches=(state.clients||[]).filter(item=>sameId(item.id,value));
+  if(matches.length<=1) return matches[0]||null;
+  return matches.find(item=>clientOwnerId(item)===String(currentUser?.id||''))||null;
+}
+function canEditClientRecord(client){ return !!currentUser&&(isAdmin()||clientOwnerId(client)===String(currentUser.id)); }
+function clientAccessNotificationText(item){ return CLIENT_ACCESS_EVENT_LABELS[item.event_type]||'به‌روزرسانی دسترسی مشتری'; }
+
+async function loadClientAccessInbox(){
+  if(currentUser?.role!=='advisor') return;
+  const [requestsResult,notificationsResult,permissionsResult]=await Promise.all([
+    _supabase.from('client_access_requests').select('id,requester_id,target_name,target_phone,reason,client_owner_id,client_record_id,status,created_at,decided_at,decided_by,decision_note,revoked_at,revoked_by').order('created_at',{ascending:false}).limit(100),
+    _supabase.from('client_access_notifications').select('id,request_id,event_type,created_at,read_at').order('created_at',{ascending:false}).limit(30),
+    _supabase.from('advisor_access_permissions').select('permission_key,granted,changed_at').eq('advisor_id',currentUser.id)
+  ]);
+  if(requestsResult.error) throw requestsResult.error;
+  if(notificationsResult.error) throw notificationsResult.error;
+  if(permissionsResult.error) throw permissionsResult.error;
+  state.clientAccessRequests=requestsResult.data||[];
+  state.clientAccessNotifications=notificationsResult.data||[];
+  state.advisorAccessPermissions=permissionsResult.data||[];
+  filterAdvisorClientStateByAccess();
+  renderClientAccessControls();
+}
+
+function filterAdvisorClientStateByAccess(){
+  if(currentUser?.role!=='advisor') return;
+  const hasAll=(state.advisorAccessPermissions||[]).some(item=>item.permission_key==='view_all_client_information'&&item.granted===true);
+  const requests=state.clientAccessRequests||[];
+  state.clients=(state.clients||[]).filter(client=>clientOwnerId(client)===String(currentUser.id)||hasAll||requests.some(request=>request.status==='approved'&&String(request.client_owner_id)===clientOwnerId(client)&&String(request.client_record_id)===String(client.id)));
+  const clientKeySet=new Set(state.clients.map(client=>clientRecordRef(client)));
+  const historyVisible=item=>{
+    const owner=String(item.clientOwnerId||item._uid||item.userId||'');
+    return !!owner&&clientKeySet.has(`${encodeURIComponent(owner)}::${encodeURIComponent(String(item.clientId||''))}`);
+  };
+  state.clientActivities=(state.clientActivities||[]).filter(historyVisible);
+  state.followups=(state.followups||[]).filter(historyVisible);
+  const modal=document.getElementById('client-details-modal');
+  const openRef=modal?.dataset?.clientRef;
+  if(openRef&&!findClientRecord(openRef)){
+    modal.classList.remove('open');
+    const content=document.getElementById('client-details-content');
+    if(content) content.innerHTML='';
+  }
+}
+
+async function refreshAdvisorClientAccess(){
+  if(currentUser?.role!=='advisor') return;
+  try{
+    await loadUserState();
+    await loadClientAccessInbox();
+    renderClients(); renderFollowups(); renderDashboard(); updateFollowupBadge(); renderClientReminders(); updateClientReminderBadge();
+  }catch(error){ notify('تازه‌سازی دسترسی مشتریان انجام نشد: '+error.message,'var(--red)'); }
+}
+
+function renderClientAccessControls(){
+  const el=document.getElementById('client-access-controls');
+  if(!el) return;
+  if(currentUser?.role!=='advisor'){ el.innerHTML=''; return; }
+  const notices=state.clientAccessNotifications||[];
+  const requests=state.clientAccessRequests||[];
+  const unread=notices.filter(item=>!item.read_at).length;
+  const noticeHTML=notices.length?notices.slice(0,12).map(item=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);"><span style="font-size:12px;${item.read_at?'color:var(--text3);':'font-weight:700;'}">${escapeHTML(clientAccessNotificationText(item))} · ${escapeHTML(clientAccessDate(item.created_at))}</span>${item.read_at?'':'<button class="btn btn-ghost btn-sm" data-notice-id="'+escapeHTML(item.id)+'" onclick="markClientAccessNotificationRead(this.dataset.noticeId)">خواندم</button>'}</div>`).join(''):'<div style="font-size:12px;color:var(--text3);">اعلان تازه‌ای ندارید.</div>';
+  const requestHTML=requests.length?requests.map(item=>`<div style="padding:11px 0;border-bottom:1px solid var(--border);"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;"><b>${escapeHTML(item.target_name||'مشتری')}</b><span class="badge ${item.status==='approved'?'badge-green':item.status==='denied'||item.status==='revoked'?'badge-gray':'badge-gold'}">${escapeHTML(CLIENT_ACCESS_STATUS_LABELS[item.status]||item.status)}</span></div><div style="font-size:11px;color:var(--text2);margin-top:5px;">ثبت: ${escapeHTML(clientAccessDate(item.created_at))}${item.decided_at?' · تصمیم مدیر: '+escapeHTML(clientAccessDate(item.decided_at)):''}${item.revoked_at?' · لغو: '+escapeHTML(clientAccessDate(item.revoked_at)):''}</div>${item.target_phone?`<div style="font-size:11px;color:var(--text2);margin-top:3px;direction:ltr;text-align:right;">${escapeHTML(item.target_phone)}</div>`:''}${item.reason?`<div style="font-size:12px;color:var(--text2);margin-top:5px;">علت: ${escapeHTML(item.reason)}</div>`:''}${item.decision_note?`<div style="font-size:12px;color:var(--text2);margin-top:5px;">پاسخ مدیر: ${escapeHTML(item.decision_note)}</div>`:''}</div>`).join(''):'<div class="empty-state" style="padding:14px 0;"><p>درخواستی ثبت نشده است</p></div>';
+  el.innerHTML=`<div class="card" style="margin-bottom:14px;"><div class="card-header"><div><div class="card-title">🔐 درخواست ارتباط با مشتریِ دفتر</div><div style="font-size:11px;color:var(--text2);margin-top:4px;">برای حفظ محرمانگی، فهرست مشتریان دیگر مشاوران نمایش داده نمی‌شود. مدیر درخواست را با پروندهٔ درست تطبیق می‌دهد.</div></div></div><div class="card-body"><div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px;"><div class="form-group"><label>نام مشتری</label><input id="client-access-target-name" maxlength="160" placeholder="نامی که مدیر بتواند تطبیق دهد"></div><div class="form-group"><label>شمارهٔ تماس (اختیاری، برای تطبیق دقیق‌تر)</label><input id="client-access-target-phone" maxlength="64" inputmode="tel" placeholder="شماره‌ای که در اختیار دارید"></div><div class="form-group full" style="grid-column:1/-1;"><label>علت درخواست (اختیاری)</label><textarea id="client-access-reason" maxlength="1000" rows="2" placeholder="چرا لازم است با این مشتری ارتباط بگیرید؟"></textarea></div></div><button class="btn btn-primary" onclick="submitClientAccessRequest()">ارسال درخواست برای مدیر</button></div></div><div class="card" style="margin-bottom:14px;"><div class="card-header"><div class="card-title">📨 پیام‌ها و وضعیت درخواست‌های من${unread?` <span class="badge badge-red">${toPersianDigits(unread)} خوانده‌نشده</span>`:''}</div><button class="btn btn-ghost btn-sm" onclick="refreshAdvisorClientAccess()">↻ به‌روزرسانی</button></div><div class="card-body">${noticeHTML}<div style="margin-top:12px;font-weight:700;font-size:12px;">تاریخچهٔ درخواست‌های من</div>${requestHTML}</div></div>`;
+}
+
+async function submitClientAccessRequest(){
+  if(currentUser?.role!=='advisor') return;
+  const name=document.getElementById('client-access-target-name')?.value.trim()||'';
+  const phone=document.getElementById('client-access-target-phone')?.value.trim()||'';
+  const reason=document.getElementById('client-access-reason')?.value.trim()||'';
+  if(name.length<2){ notify('نام مشتری را وارد کنید','var(--red)'); return; }
+  try{
+    const {error}=await _supabase.rpc('request_client_access',{p_target_name:name,p_target_phone:phone,p_reason:reason});
+    if(error) throw error;
+    notify('درخواست برای مدیر ارسال شد؛ وضعیت و تاریخ تصمیم در همین بخش نمایش داده می‌شود ✅');
+    await loadClientAccessInbox();
+  }catch(error){ notify('ثبت درخواست انجام نشد: '+error.message,'var(--red)'); }
+}
+
+async function markClientAccessNotificationRead(id){
+  try{
+    const {error}=await _supabase.rpc('mark_client_access_notification_read',{p_notification_id:id});
+    if(error) throw error;
+    if(currentUser?.role==='advisor') await refreshAdvisorClientAccess(); else await renderAdminPage();
+  }catch(error){ notify('به‌روزرسانی اعلان انجام نشد: '+error.message,'var(--red)'); }
+}
+
+function clientAccessCandidates(request){
+  const wantedName=String(request.target_name||'').trim().toLocaleLowerCase();
+  const wantedPhone=normalizePhoneForDuplicate(request.target_phone||'');
+  return (state.clients||[]).filter(client=>{
+    if(String(client.name||'').trim().toLocaleLowerCase()!==wantedName) return false;
+    return !wantedPhone||normalizePhoneForDuplicate(client.phone)===wantedPhone;
+  });
+}
+function clientAccessCandidateLabel(client){
+  const owner=clientOwnerId(client);
+  const ownerName=(state.allUsers||[]).find(user=>String(user.id)===owner)?.fullname||'مالک پرونده';
+  return `${client.name||'بدون نام'} · ${client.phone||'بدون شماره'} · ${ownerName}`;
+}
+function renderAdminClientAccess(){
+  const el=document.getElementById('admin-client-access-requests');
+  if(!el) return;
+  const requests=state.clientAccessRequests||[];
+  const notices=(state.clientAccessNotifications||[]).filter(item=>!item.read_at).slice(0,10);
+  const noticeHTML=notices.length?`<div style="padding:10px;margin-bottom:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);"><b style="font-size:12px;">اعلان‌های جدید</b>${notices.map(item=>`<div style="display:flex;justify-content:space-between;gap:8px;padding-top:7px;font-size:11px;"><span>${escapeHTML(clientAccessNotificationText(item))} · ${escapeHTML(clientAccessDate(item.created_at))}</span><button class="btn btn-ghost btn-sm" data-notice-id="${escapeHTML(item.id)}" onclick="markClientAccessNotificationRead(this.dataset.noticeId)">خواندم</button></div>`).join('')}</div>`:'';
+  if(!requests.length){ el.innerHTML=noticeHTML+'<div class="empty-state"><div class="icon">🔐</div><p>درخواست دسترسی ثبت نشده است</p></div>'; return; }
+  const sorted=[...requests].sort((a,b)=>(a.status==='pending'?-1:0)-(b.status==='pending'?-1:0)||new Date(b.created_at)-new Date(a.created_at));
+  const cards=sorted.map(request=>{
+    const requester=(state.allUsers||[]).find(user=>String(user.id)===String(request.requester_id));
+    const candidates=clientAccessCandidates(request);
+    const selected=candidates.find(client=>String(client.id)===String(request.client_record_id)&&clientOwnerId(client)===String(request.client_owner_id));
+    const selectOptions=candidates.map(client=>{
+      const value=JSON.stringify({ownerId:clientOwnerId(client),recordId:String(client.id)});
+      return `<option value="${escapeHTML(value)}" ${selected&&String(selected.id)===String(client.id)&&clientOwnerId(selected)===clientOwnerId(client)?'selected':''}>${escapeHTML(clientAccessCandidateLabel(client))}</option>`;
+    }).join('');
+    const target=request.client_record_id&&selected?`<div style="font-size:11px;color:var(--text2);margin-top:4px;">پروندهٔ مرتبط: ${escapeHTML(clientAccessCandidateLabel(selected))}</div>`:'';
+    let controls='';
+    if(request.status==='pending') controls=`<div class="form-group" style="margin-top:10px;"><label>پروندهٔ دقیق مشتری برای تطبیق${candidates.length?'':' — موردی با این نام/شماره پیدا نشد'}</label><select id="client-access-match-${escapeHTML(request.id)}"><option value="">انتخاب پرونده…</option>${selectOptions}</select></div><div class="form-group" style="margin-top:8px;"><label>یادداشت تصمیم مدیر (اختیاری)</label><input id="client-access-note-${escapeHTML(request.id)}" maxlength="1000" placeholder="توضیح برای مشاور"></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px;"><button class="btn btn-primary btn-sm" data-request-id="${escapeHTML(request.id)}" onclick="decideClientAccessRequest(this.dataset.requestId,'approved')">تأیید و دادن دسترسی</button><button class="btn btn-danger btn-sm" data-request-id="${escapeHTML(request.id)}" onclick="decideClientAccessRequest(this.dataset.requestId,'denied')">رد درخواست</button></div>`;
+    else if(request.status==='approved') controls=`<button class="btn btn-danger btn-sm" data-request-id="${escapeHTML(request.id)}" onclick="revokeClientAccess(this.dataset.requestId)" style="margin-top:9px;">برداشتن دسترسی این مشتری</button>`;
+    const statusClass=request.status==='approved'?'badge-green':request.status==='pending'?'badge-gold':'badge-gray';
+    return `<div style="padding:12px;margin-bottom:9px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><b>${escapeHTML(request.target_name||'مشتری')} · ${escapeHTML(requester?.fullname||'مشاور')}</b><span class="badge ${statusClass}">${escapeHTML(CLIENT_ACCESS_STATUS_LABELS[request.status]||request.status)}</span></div>${request.target_phone?`<div style="font-size:11px;color:var(--text2);margin-top:4px;direction:ltr;text-align:right;">شمارهٔ درج‌شده در درخواست: ${escapeHTML(request.target_phone)}</div>`:''}${request.reason?`<div style="font-size:12px;color:var(--text2);margin-top:4px;">علت: ${escapeHTML(request.reason)}</div>`:''}<div style="font-size:10px;color:var(--text3);margin-top:5px;">ثبت: ${escapeHTML(clientAccessDate(request.created_at))}${request.decided_at?' · تصمیم: '+escapeHTML(clientAccessDate(request.decided_at)):''}${request.revoked_at?' · لغو دسترسی: '+escapeHTML(clientAccessDate(request.revoked_at)):''}</div>${request.decision_note?`<div style="font-size:11px;color:var(--text2);margin-top:4px;">یادداشت مدیر: ${escapeHTML(request.decision_note)}</div>`:''}${target}${controls}</div>`;
+  }).join('');
+  el.innerHTML=noticeHTML+cards;
+}
+
+async function decideClientAccessRequest(requestId,decision){
+  if(!isAdmin()||!['approved','denied'].includes(decision)) return;
+  const select=document.getElementById(`client-access-match-${requestId}`);
+  let clientOwnerIdValue=null,clientRecordId=null;
+  if(select?.value){
+    try{ const candidate=JSON.parse(select.value); clientOwnerIdValue=String(candidate.ownerId); clientRecordId=String(candidate.recordId); }
+    catch(error){ notify('انتخاب پرونده معتبر نیست','var(--red)'); return; }
+  }
+  if(decision==='approved'&&!clientRecordId){ notify('برای تأیید، پروندهٔ دقیق مشتری را انتخاب کنید','var(--red)'); return; }
+  const request=(state.clientAccessRequests||[]).find(item=>String(item.id)===String(requestId));
+  const note=document.getElementById(`client-access-note-${requestId}`)?.value.trim()||'';
+  const actionText=decision==='approved'?'تأیید و اعطای دسترسی فقط‌خواندنی':'رد درخواست دسترسی';
+  if(!confirm(`${actionText}${request?` برای «${request.target_name}»`:''} انجام شود؟`)) return;
+  try{
+    const {error}=await _supabase.rpc('manager_decide_client_access',{p_request_id:requestId,p_decision:decision,p_client_owner_id:clientOwnerIdValue,p_client_record_id:clientRecordId,p_note:note});
+    if(error) throw error;
+    notify(decision==='approved'?'دسترسی فقط‌خواندنی برای همین پرونده فعال شد ✅':'درخواست رد شد و نتیجه برای مشاور ثبت شد');
+    await renderAdminPage();
+  }catch(error){ notify('ثبت تصمیم انجام نشد: '+error.message,'var(--red)'); }
+}
+
+async function revokeClientAccess(requestId){
+  if(!isAdmin()) return;
+  if(!confirm('دسترسی مشاور به این پرونده از این لحظه در درخواست‌های بعدی برداشته شود؟ اطلاعاتی که قبلاً دیده یا ذخیره کرده قابل پس‌گرفتن نیست.')) return;
+  try{
+    const {error}=await _supabase.rpc('manager_revoke_client_access',{p_request_id:requestId,p_note:''});
+    if(error) throw error;
+    notify('دسترسی پرونده لغو شد؛ رویداد در تاریخچه ثبت شد ✅');
+    await renderAdminPage();
+  }catch(error){ notify('لغو دسترسی انجام نشد: '+error.message,'var(--red)'); }
+}
+
+async function setAdvisorClientPermission(advisorId,granted){
+  if(!isAdmin()) return;
+  if(granted&&!confirm('با این مجوز، مشاور همهٔ پرونده‌های مشتریان دفتر را می‌بیند؛ شامل شمارهٔ تماس، یادداشت‌ها، فیلدهای پرونده و پیگیری‌های مرتبط. مجوز فقط‌خواندنی است و قابل لغو است. ادامه می‌دهید؟')) return;
+  try{
+    const {error}=await _supabase.rpc('manager_set_advisor_permission',{p_advisor_id:advisorId,p_permission_key:'view_all_client_information',p_granted:!!granted});
+    if(error) throw error;
+    notify(granted?'دسترسی مشاهدهٔ همهٔ اطلاعات مشتریان داده شد ✅':'دسترسی مشاهدهٔ همهٔ اطلاعات مشتریان برداشته شد');
+    await renderAdminPage();
+  }catch(error){ notify('تغییر دسترسی انجام نشد: '+error.message,'var(--red)'); await renderAdminPage(); }
+}
+
+async function openAdvisorClientAccessHistory(advisorId){
+  if(!isAdmin()) return;
+  const card=document.getElementById('admin-client-access-history-card');
+  const title=document.getElementById('admin-client-access-history-title');
+  const el=document.getElementById('admin-client-access-history');
+  const advisor=(state.allUsers||[]).find(user=>String(user.id)===String(advisorId));
+  card.style.display='block'; title.textContent=`🕘 تاریخچهٔ دسترسی — ${advisor?.fullname||'مشاور'}`;
+  el.innerHTML='<div class="empty-state"><p>در حال بارگذاری تاریخچه...</p></div>';
+  try{
+    const {data,error}=await _supabase.from('client_access_audit').select('id,request_id,advisor_id,client_owner_id,client_record_id,actor_id,action,created_at').eq('advisor_id',advisorId).order('created_at',{ascending:false}).limit(200);
+    if(error) throw error;
+    state.clientAccessAudit=data||[];
+    el.innerHTML=state.clientAccessAudit.length?state.clientAccessAudit.map(item=>{
+      const actor=(state.allUsers||[]).find(user=>String(user.id)===String(item.actor_id));
+      const client=(state.clients||[]).find(value=>String(value.id)===String(item.client_record_id)&&clientOwnerId(value)===String(item.client_owner_id));
+      return `<div style="padding:9px 0;border-bottom:1px solid var(--border);font-size:12px;"><b>${escapeHTML(CLIENT_ACCESS_ACTION_LABELS[item.action]||item.action)}</b>${client?` · مشتری: ${escapeHTML(client.name||'بدون نام')}`:''}<div style="font-size:10px;color:var(--text3);margin-top:3px;">${escapeHTML(clientAccessDate(item.created_at))} · انجام‌دهنده: ${escapeHTML(actor?.fullname||'مدیر')}</div></div>`;
+    }).join(''):'<div class="empty-state"><p>رویدادی ثبت نشده است</p></div>';
+    card.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }catch(error){ el.innerHTML=`<div class="empty-state"><p>تاریخچه بارگذاری نشد: ${escapeHTML(error.message)}</p></div>`; }
+}
+
+async function loadClientAccessAuditForClient(client){
+  if(!isAdmin()||!client) return;
+  const el=document.getElementById('client-access-audit-content');
+  if(!el) return;
+  const owner=clientOwnerId(client);
+  try{
+    const {data,error}=await _supabase.from('client_access_audit').select('id,request_id,advisor_id,client_owner_id,client_record_id,actor_id,action,created_at').eq('client_owner_id',owner).eq('client_record_id',String(client.id)).order('created_at',{ascending:false}).limit(100);
+    if(error) throw error;
+    const rows=data||[];
+    el.innerHTML=rows.length?rows.map(item=>{
+      const advisor=(state.allUsers||[]).find(user=>String(user.id)===String(item.advisor_id));
+      const actor=(state.allUsers||[]).find(user=>String(user.id)===String(item.actor_id));
+      return `<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:11px;"><b>${escapeHTML(CLIENT_ACCESS_ACTION_LABELS[item.action]||item.action)}</b> · مشاور: ${escapeHTML(advisor?.fullname||'حساب مشاور')}<div style="font-size:10px;color:var(--text3);margin-top:3px;">${escapeHTML(clientAccessDate(item.created_at))} · مدیر: ${escapeHTML(actor?.fullname||'مدیر')}</div></div>`;
+    }).join(''):'<div style="font-size:11px;color:var(--text3);">تاریخچهٔ دسترسی برای این پرونده ثبت نشده است.</div>';
+  }catch(error){ el.innerHTML=`<div style="font-size:11px;color:var(--red);">تاریخچه بارگذاری نشد: ${escapeHTML(error.message)}</div>`; }
+}
+
 async function copyCustomerSignupLink(){
   const url=new URL(window.location.href);
   url.search=''; url.hash=''; url.searchParams.set('signup','customer');
@@ -3188,6 +3464,7 @@ let propertyPriceLastCalculatedPerMeter = '';
 let propertyPriceLastCalculatedPerMeterId = '';
 let pendingPropertyTextFields = null;
 let editingClientId = null;
+let editingClientOwnerUid = null;
 let clientDynamicFieldCache = {};
 let editingAdvisorId = null;
 let editingDealId = null;
@@ -3200,6 +3477,7 @@ const DEAL_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 let editingTgPostId = null;
 let editingReminderId = null;
 let editingFollowupId = null;
+let editingFollowupOwnerUid = null;
 let editingIncomeId = null;
 let editingImagesDirty = false;
 
@@ -3261,7 +3539,7 @@ function populateDealClientOptions(selectedId=''){
     const advisor = (state.advisors || []).find(item => sameId(item.id, ownerUid));
     const ownerName = advisor?.fullname || advisor?.name || '';
     const label = `${client.name || 'مشتری بدون نام'}${isAdmin() && ownerName ? ` — ${ownerName}` : ''}`;
-    return `<option value="${escapeHTML(String(client.id))}">${escapeHTML(label)}</option>`;
+    return `<option value="${escapeHTML(clientRecordRef(client))}">${escapeHTML(label)}</option>`;
   }).join('');
   select.innerHTML = '<option value="">بدون ارتباط با مشتری</option>' + options;
   select.value = String(selectedId || '');
@@ -3295,6 +3573,7 @@ function openNewReminderModal(){
 }
 function openNewFollowupModal(){
   editingFollowupId = null;
+  editingFollowupOwnerUid = null;
   renderFollowups();
   setFieldValue('fu-client',''); setFieldValue('fu-type','call'); setFieldValue('fu-result','interested'); setFieldValue('fu-notes',''); setFieldValue('fu-next-date',''); setFieldValue('fu-next-time','');
   setModalMode('followup-modal', '📞 ثبت پیگیری', '💾 ذخیره پیگیری');
@@ -3308,6 +3587,7 @@ function openNewIncomeModal(){
 }
 function openNewClientModal(){
   editingClientId = null;
+  editingClientOwnerUid = null;
   clientDynamicFieldCache = {};
   setFieldValue('c-name',''); setFieldValue('c-phone',''); setFieldValue('c-request','خرید');
   setFieldValue('c-priority','mid'); setFieldValue('c-area',''); setFieldValue('c-source',''); setFieldValue('c-notes','');
@@ -5696,9 +5976,11 @@ function updateClientFields(selectedPropertyType, preserveValues=true) {
 }
 
 function openEditClient(id){
-  const c = state.clients.find(item => sameId(item.id, id));
+  const c = findClientRecord(id);
   if(!c) return;
+  if(!canEditClientRecord(c)){ notify('این پرونده فقط برای مشاهده به شما واگذار شده است','var(--red)'); return; }
   editingClientId = String(c.id);
+  editingClientOwnerUid = clientOwnerId(c);
   clientDynamicFieldCache = Object.fromEntries(Object.entries(c.dynFields || {}).map(([key,value]) => [`c-${key}`,value]));
   setFieldValue('c-name', c.name || '');
   setFieldValue('c-phone', c.phone || '');
@@ -5734,7 +6016,7 @@ async function saveClient(){
   if(dynFields['prop-type'] === 'زمین') {
     ['rooms-min','floor-pref','parking-need','elevator','storage','max-year','partner-floors','pets'].forEach(key => delete dynFields[key]);
   }
-  const existing = editingClientId ? state.clients.find(item => sameId(item.id, editingClientId)) : null;
+  const existing = editingClientId ? (state.clients||[]).find(item => sameId(item.id, editingClientId) && clientOwnerId(item)===String(editingClientOwnerUid||currentUser.id)) : null;
   const isEditing = !!existing;
   const ownerUid = existing?._uid || existing?.userId || currentUser.id;
   const reminderActive = !!document.getElementById('c-reminder-enabled')?.checked;
@@ -5753,10 +6035,11 @@ async function saveClient(){
   try {
     await saveRecordToOwner('clients', c, ownerUid);
     if(isEditing){
-      const index = state.clients.findIndex(item => sameId(item.id, c.id));
+      const index = state.clients.findIndex(item => sameId(item.id, c.id) && clientOwnerId(item)===String(ownerUid));
       if(index >= 0) state.clients[index] = c;
     } else state.clients.unshift(c);
     editingClientId = null;
+    editingClientOwnerUid = null;
     clearForm(['c-name','c-phone','c-budget','c-area','c-notes']);
     const reminderInput = document.getElementById('c-reminder-enabled');
     if(reminderInput) reminderInput.checked = false;
@@ -5794,8 +6077,9 @@ function clientDetailValue(value, key=''){
 }
 
 function openClientDetails(id){
-  const c = state.clients.find(x => String(x.id) === String(id));
+  const c = findClientRecord(id);
   if(!c) return;
+  const canEdit=canEditClientRecord(c);
   const request = c.request || 'نامشخص';
   const priority = CLIENT_PRIORITY_LABELS[c.priority] || c.priority || 'نامشخص';
   const dynEntries = Object.entries(c.dynFields || {}).filter(([,value]) => value !== null && value !== undefined && String(value) !== '');
@@ -5812,11 +6096,13 @@ function openClientDetails(id){
   const extra = dynEntries.map(([key,value]) => propertyDetailCard(clientDetailFallbackLabel(key), clientDetailValue(value, key))).join('');
   const notes = c.notes ? `<div class="property-detail-section"><div class="property-detail-section-title">📝 یادداشت و نکات مهم</div><div class="property-detail-notes">${propertyDetailValue(c.notes)}</div></div>` : '';
   const activitySection = renderClientActivitySection(c);
-  const reminderAction = c.reminderEnabled
-    ? `<button class="btn btn-ghost btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="toggleClientReminder(this.dataset.clientId, false); closeModal('client-details-modal')">🔕 خاموش کردن یادآوری</button>`
-    : `<button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="toggleClientReminder(this.dataset.clientId, true); closeModal('client-details-modal')">🔔 فعال کردن یادآوری</button>`;
-  const editAction = `<button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="closeModal('client-details-modal'); openEditClient(this.dataset.clientId)">✏️ ویرایش مشتری</button>`;
-  const dealAction = isAdmin() ? `<button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="openDealFromClient(this)">📋 ثبت معامله</button>` : '';
+  const ref=escapeHTML(clientRecordRef(c));
+  const reminderAction = !canEdit ? '' : (c.reminderEnabled
+    ? `<button class="btn btn-ghost btn-sm" data-client-id="${ref}" onclick="toggleClientReminder(this.dataset.clientId, false); closeModal('client-details-modal')">🔕 خاموش کردن یادآوری</button>`
+    : `<button class="btn btn-primary btn-sm" data-client-id="${ref}" onclick="toggleClientReminder(this.dataset.clientId, true); closeModal('client-details-modal')">🔔 فعال کردن یادآوری</button>`);
+  const editAction = canEdit ? `<button class="btn btn-primary btn-sm" data-client-id="${ref}" onclick="closeModal('client-details-modal'); openEditClient(this.dataset.clientId)">✏️ ویرایش مشتری</button>` : '';
+  const dealAction = isAdmin() ? `<button class="btn btn-primary btn-sm" data-client-id="${ref}" onclick="openDealFromClient(this)">📋 ثبت معامله</button>` : '';
+  const accessHistory=isAdmin()?`<div class="property-detail-section"><div class="property-detail-section-title">🔐 تاریخچهٔ درخواست‌ها و دسترسی‌ها (فقط مدیر)</div><div id="client-access-audit-content" style="max-height:220px;overflow:auto;"><div style="font-size:11px;color:var(--text3);">در حال بارگذاری…</div></div></div>`:'';
 
   document.getElementById('client-details-title').textContent = `🔎 جزئیات مشتری — ${c.name || 'بدون نام'}`;
   document.getElementById('client-details-content').innerHTML = `
@@ -5825,9 +6111,13 @@ function openClientDetails(id){
     ${extra ? `<div class="property-detail-section"><div class="property-detail-section-title">🎯 نیازمندی‌های مشتری</div><div class="property-detail-grid">${extra}</div></div>` : ''}
     ${notes}
     ${activitySection}
+    ${accessHistory}
     <div style="display:flex;justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:14px;">${reminderAction}${editAction}${dealAction}</div>
   `;
+  const modal=document.getElementById('client-details-modal');
+  if(modal) modal.dataset.clientRef=clientRecordRef(c);
   openModal('client-details-modal');
+  if(isAdmin()) loadClientAccessAuditForClient(c);
   requestAnimationFrame(() => renderClientActivityChart(c));
 }
 
@@ -5915,6 +6205,7 @@ function buildClientActivityEvents(client){
 }
 
 function renderClientActivitySection(client){
+  const canEdit=canEditClientRecord(client);
   const events = buildClientActivityEvents(client);
   const followupCount = events.filter(event => event.category === 'followup').length;
   const dealCount = events.filter(event => event.category === 'deal').length;
@@ -5929,7 +6220,7 @@ function renderClientActivitySection(client){
         ${event.nextDate ? `<div style="font-size:11px;color:var(--text3);margin-top:3px;">📅 پیگیری بعدی: ${escapeHTML(event.nextDate)} (در شمارش فعالیت‌ها جداگانه حساب نمی‌شود)</div>` : ''}
         <div style="font-size:10px;color:var(--text3);margin-top:5px;">${escapeHTML(siteDateDisplay(event.date) || 'تاریخ نامشخص')}${event.actor ? ` · ثبت‌کننده: ${escapeHTML(event.actor)}` : ''}</div>
       </div>
-      ${event.canDelete ? `<button class="btn btn-danger btn-sm" data-activity-id="${escapeHTML(event.sourceId)}" data-client-id="${escapeHTML(String(client.id))}" onclick="deleteClientActivity(this.dataset.activityId,this.dataset.clientId)" aria-label="حذف فعالیت">🗑</button>` : ''}
+      ${event.canDelete&&canEdit ? `<button class="btn btn-danger btn-sm" data-activity-id="${escapeHTML(event.sourceId)}" data-client-id="${escapeHTML(clientRecordRef(client))}" onclick="deleteClientActivity(this.dataset.activityId,this.dataset.clientId)" aria-label="حذف فعالیت">🗑</button>` : ''}
     </div>`).join('') : '<div class="empty-state" style="padding:22px 0;"><div class="icon">📈</div><p>هنوز فعالیت مهمی برای این مشتری ثبت نشده است</p></div>';
 
   return `<div class="property-detail-section" data-client-activity-panel>
@@ -5942,14 +6233,14 @@ function renderClientActivitySection(client){
     </div>
     <div style="font-size:11px;color:var(--text3);line-height:1.8;margin-bottom:10px;">چت داخلی ثبت نمی‌شود. پیگیری‌های ثبت‌شده در بخش «پیگیری مشتریان» به‌عنوان اقدام انجام‌شده نمایش داده می‌شوند؛ تاریخ پیگیری بعدی جداست. معامله فقط وقتی شمرده می‌شود که در بخش معاملات به همین مشتری وصل شده باشد.</div>
     <div style="position:relative;height:220px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:8px;margin-bottom:12px;"><canvas id="client-activity-chart" aria-label="نمودار ماهانه فعالیت‌های مشتری"></canvas></div>
-    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px;">
+    ${canEdit?`<div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px;">
       <div style="font-size:12px;font-weight:700;margin-bottom:9px;">➕ ثبت فعالیت مهم</div>
       <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:9px;">
-        <div class="form-group"><label>نوع فعالیت</label><select data-activity-type><option value="call">📞 تماس تلفنی</option><option value="message">💬 پیام خارج از چت</option><option value="meeting">🤝 جلسه</option><option value="visit">🏠 بازدید</option><option value="note">📝 یادداشت مهم</option></select></div>
+        <div class="form-group"><label>نوع فعالیت</label><select data-activity-type><option value="call">📞 تماس تلفنی</option><option value="message">💬 پیام خارج از چت</option><option value="meeting">🤝 جلسه حضوری</option><option value="visit">🏠 بازدید ملک</option><option value="note">📝 یادداشت مهم</option></select></div>
         <div class="form-group full" style="grid-column:1/-1;"><label>خلاصهٔ فعالیت</label><textarea data-activity-note maxlength="600" rows="2" placeholder="مثلاً نتیجه تماس، بازدید یا پیگیری مهم"></textarea></div>
       </div>
-      <button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(client.id))}" onclick="saveClientActivity(this)">💾 ثبت فعالیت</button>
-    </div>
+      <button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(clientRecordRef(client))}" onclick="saveClientActivity(this)">💾 ثبت فعالیت</button>
+    </div>`:''}
     <div style="font-size:12px;font-weight:700;margin:12px 0 4px;">🕘 خط زمانی رویدادها</div>
     <div style="max-height:360px;overflow:auto;">${timeline}</div>
   </div>`;
@@ -5990,11 +6281,12 @@ function renderClientActivityChart(client){
 }
 
 async function saveClientActivity(button){
-  const client = state.clients.find(item => sameId(item.id, button?.dataset?.clientId));
+  const client = findClientRecord(button?.dataset?.clientId);
   const panel = button?.closest('[data-client-activity-panel]');
   const notes = panel?.querySelector('[data-activity-note]')?.value.trim() || '';
   const type = panel?.querySelector('[data-activity-type]')?.value || 'note';
   if(!client){ notify('مشتری پیدا نشد','var(--red)'); return; }
+  if(!canEditClientRecord(client)){ notify('ثبت فعالیت برای پروندهٔ واگذارشده مجاز نیست','var(--red)'); return; }
   if(!notes){ notify('خلاصهٔ فعالیت را وارد کنید','var(--red)'); return; }
   const ownerUid = clientActivityOwnerId(client);
   const now = Date.now();
@@ -6005,7 +6297,7 @@ async function saveClientActivity(button){
     await saveRecordToOwner('clientActivities', activity, ownerUid);
     state.clientActivities = state.clientActivities || [];
     state.clientActivities.unshift({...activity,_uid:ownerUid});
-    openClientDetails(client.id);
+    openClientDetails(clientRecordRef(client));
     notify('فعالیت مشتری ثبت شد ✅');
   } catch(error){
     if(button) button.disabled = false;
@@ -6014,18 +6306,21 @@ async function saveClientActivity(button){
 }
 
 async function deleteClientActivity(id, clientId){
-  const activity = (state.clientActivities || []).find(item => sameId(item.id, id));
+  const client=findClientRecord(clientId);
+  const ownerUid=client?clientOwnerId(client):'';
+  const activity = (state.clientActivities || []).find(item => sameId(item.id, id) && String(item._uid||item.userId||'')===ownerUid);
+  if(client&&!canEditClientRecord(client)){ notify('حذف فعالیت در پروندهٔ واگذارشده مجاز نیست','var(--red)'); return; }
   if(!activity || !confirm('این فعالیت از سابقهٔ مشتری حذف شود؟')) return;
-  const ownerUid = recordOwnerForCurrentView(activity);
   try {
     await deleteRecordToOwner('clientActivities', activity.id, ownerUid);
     state.clientActivities = state.clientActivities.filter(item => !sameId(item.id, activity.id) || String(item._uid || item.userId || currentUser.id) !== ownerUid);
-    openClientDetails(clientId);
+    openClientDetails(client?clientRecordRef(client):clientId);
     notify('فعالیت حذف شد');
   } catch(error){ notify('خطا در حذف فعالیت: ' + error.message, 'var(--red)'); }
 }
 
 function renderClients(){
+  renderClientAccessControls();
   const q = document.getElementById('client-search')?.value.toLowerCase()||'';
   const list = state.clients.filter(c=>(c.name||'').toLowerCase().includes(q)||(c.phone||'').includes(q));
   const el = document.getElementById('clients-table');
@@ -6071,7 +6366,7 @@ function renderClients(){
     <th>نام</th><th>موبایل</th><th>درخواست</th><th>بودجه / مبلغ</th>
     <th>جزئیات</th><th>منطقه</th><th>اولویت</th><th>یادداشت</th><th>یادآوری</th><th>عملیات</th>
   </tr></thead><tbody>
-  ${list.map(c=>`<tr data-client-id="${escapeHTML(String(c.id))}" style="cursor:pointer;" title="برای مشاهده جزئیات مشتری کلیک کنید">
+  ${list.map(c=>{const canEdit=canEditClientRecord(c);const clientRef=escapeHTML(clientRecordRef(c));return `<tr data-client-id="${clientRef}" style="cursor:pointer;" title="برای مشاهده جزئیات مشتری کلیک کنید">
     <td><b>${escapeHTML(c.name)}</b>${c.source?`<br><span style="font-size:10px;color:var(--text3)">${escapeHTML(c.source)}</span>`:''}</td>
     <td><a href="tel:${safePhone(c.phone)}" style="color:var(--blue)">${escapeHTML(c.phone||'—')}</a></td>
     <td><span class="badge badge-blue">${reqIcon[c.request]||''} ${escapeHTML(c.request)}</span></td>
@@ -6082,13 +6377,13 @@ function renderClients(){
     <td style="font-size:12px;color:var(--text2);max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHTML(c.notes||'—')}</td>
     <td>${c.reminderEnabled ? '<span class="badge badge-red">🔔 فعال</span>' : '<span class="badge badge-gray">خاموش</span>'}</td>
     <td style="display:flex;gap:6px;align-items:center">
-      <button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="openClientDetails(this.dataset.clientId)" title="مشاهده اطلاعات کامل مشتری">🔎 جزئیات</button>
-      <button class="btn btn-ghost btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="openEditClient(this.dataset.clientId)" title="ویرایش مشتری">✏️ ویرایش</button>
-      <button class="btn btn-sm" data-client-id="${escapeHTML(String(c.id))}" style="background:${c.reminderEnabled ? 'var(--surface3)' : 'var(--accent)'};color:${c.reminderEnabled ? 'var(--text)' : '#000'};font-size:12px;" onclick="toggleClientReminder(this.dataset.clientId)" title="${c.reminderEnabled ? 'خاموش کردن یادآوری' : 'فعال کردن یادآوری'}">${c.reminderEnabled ? '🔕 خاموش' : '🔔 یادآوری'}</button>
-      <button class="btn btn-sm" style="background:var(--accent);color:#000;font-size:12px;" onclick="matchProperties(${c.id})" title="تطبیق با ملک‌ها">🔍 تطبیق</button>
-      <button class="btn btn-danger btn-sm" onclick="deleteClient(${c.id})">🗑</button>
+      <button class="btn btn-primary btn-sm" data-client-id="${clientRef}" onclick="openClientDetails(this.dataset.clientId)" title="مشاهده اطلاعات کامل مشتری">🔎 جزئیات</button>
+      ${canEdit?`<button class="btn btn-ghost btn-sm" data-client-id="${clientRef}" onclick="openEditClient(this.dataset.clientId)" title="ویرایش مشتری">✏️ ویرایش</button>`:''}
+      ${canEdit?`<button class="btn btn-sm" data-client-id="${clientRef}" style="background:${c.reminderEnabled ? 'var(--surface3)' : 'var(--accent)'};color:${c.reminderEnabled ? 'var(--text)' : '#000'};font-size:12px;" onclick="toggleClientReminder(this.dataset.clientId)" title="${c.reminderEnabled ? 'خاموش کردن یادآوری' : 'فعال کردن یادآوری'}">${c.reminderEnabled ? '🔕 خاموش' : '🔔 یادآوری'}</button>`:''}
+      <button class="btn btn-sm" data-client-id="${clientRef}" style="background:var(--accent);color:#000;font-size:12px;" onclick="matchProperties(this.dataset.clientId)" title="تطبیق با ملک‌ها">🔍 تطبیق</button>
+      ${canEdit?`<button class="btn btn-danger btn-sm" data-client-id="${clientRef}" onclick="deleteClient(this.dataset.clientId)">🗑</button>`:''}
     </td>
-  </tr>`).join('')}
+  </tr>`;}).join('')}
   </tbody></table>`;
 
   // کلیک روی بخش‌های غیرعملیاتی ردیف، جزئیات مشتری را باز می‌کند؛ دکمه‌ها و لینک تماس مستقل می‌مانند.
@@ -6140,8 +6435,8 @@ function renderClientReminders(){
         <div class="reminder-time">${escapeHTML(c.request || 'درخواست نامشخص')}${c.area ? ' · ' + escapeHTML(c.area) : ''}${c.phone ? ' · ' + escapeHTML(c.phone) : ''}</div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
-        <button class="btn btn-ghost btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="openClientDetails(this.dataset.clientId)">جزئیات</button>
-        <button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(String(c.id))}" onclick="toggleClientReminder(this.dataset.clientId, false, true)">انجام شد</button>
+        <button class="btn btn-ghost btn-sm" data-client-id="${escapeHTML(clientRecordRef(c))}" onclick="openClientDetails(this.dataset.clientId)">جزئیات</button>
+        ${canEditClientRecord(c)?`<button class="btn btn-primary btn-sm" data-client-id="${escapeHTML(clientRecordRef(c))}" onclick="toggleClientReminder(this.dataset.clientId, false, true)">انجام شد</button>`:'<span class="badge badge-gray">فقط مشاهده</span>'}
       </div>
     </div>
   `).join('');
@@ -6149,8 +6444,9 @@ function renderClientReminders(){
 }
 
 async function toggleClientReminder(id, enabled, recordCompletion=false){
-  const client = state.clients.find(c => String(c.id) === String(id));
+  const client = findClientRecord(id);
   if(!client) return;
+  if(!canEditClientRecord(client)){ notify('تغییر یادآوری برای پروندهٔ واگذارشده مجاز نیست','var(--red)'); return; }
   const next = enabled === undefined ? !client.reminderEnabled : !!enabled;
   const ownerUid = clientActivityOwnerId(client);
   const wasActive = !!client.reminderEnabled && client.reminderStatus !== 'completed';
@@ -6189,9 +6485,12 @@ async function toggleClientReminder(id, enabled, recordCompletion=false){
 }
 
 async function deleteClient(id){
+  const client=findClientRecord(id);
+  if(client&&!canEditClientRecord(client)){ notify('حذف این پرونده برای شما مجاز نیست','var(--red)'); return; }
+  if(!client){ notify('پروندهٔ دقیق مشتری پیدا نشد','var(--red)'); return; }
   try {
-    await _deleteDoc('clients', id);
-    state.clients = state.clients.filter(c=>!sameId(c.id, id));
+    await deleteRecordToOwner('clients', client.id, clientOwnerId(client));
+    state.clients = state.clients.filter(c=>!(sameId(c.id, client.id)&&clientOwnerId(c)===clientOwnerId(client)));
     renderClients(); updateCounts();
     notify('مشتری حذف شد','var(--red)');
   } catch(e){ notify('خطا در حذف','var(--red)'); }
@@ -6277,10 +6576,12 @@ function openEditDeal(id){
   if(!d) return;
   editingDealId = String(d.id);
   resetDealAttachments(d);
-  populateDealClientOptions(d.clientId || '');
+  const linkedClient=(state.clients||[]).find(item=>sameId(item.id,d.clientId)&&(!d.clientOwnerId||clientOwnerId(item)===String(d.clientOwnerId)));
+  const clientRef=linkedClient?clientRecordRef(linkedClient):'';
+  populateDealClientOptions(clientRef);
   setFieldValue('d-title', d.title || ''); setFieldValue('d-type', d.type || 'فروش');
   setFieldValue('d-price', d.price || ''); setFieldValue('d-commission', d.commission || '');
-  setFieldValue('d-client', d.clientId || '');
+  setFieldValue('d-client', clientRef);
   setFieldValue('d-advisor', d.advisor || ''); setFieldValue('d-date', siteDateForInput(d.date));
   setModalMode('deal-modal', '✏️ ویرایش معامله', '💾 ذخیره تغییرات');
   openModal('deal-modal');
@@ -6452,7 +6753,7 @@ async function saveDeal(){
   const isEditing = !!existing;
   const previousOwnerUid = recordOwnerForCurrentView(existing, currentUser.id);
   const clientId = document.getElementById('d-client')?.value || '';
-  const linkedClient = clientId ? state.clients.find(item => sameId(item.id, clientId)) : null;
+  const linkedClient = clientId ? findClientRecord(clientId) : null;
   if(clientId && !linkedClient){ notify('مشتری انتخاب‌شده پیدا نشد؛ فهرست را تازه کنید','var(--red)'); return; }
   const ownerUid = linkedClient ? clientActivityOwnerId(linkedClient) : previousOwnerUid;
   if(!isAdmin() && ownerUid !== String(currentUser.id)){ notify('فقط می‌توانید معامله را به مشتری خودتان وصل کنید','var(--red)'); return; }
@@ -6864,7 +7165,7 @@ function clearForm(ids){ ids.forEach(id=>{ const el=document.getElementById(id);
 authInit();
 
 function matchProperties(clientId) {
-  var client = state.clients.find(function(c){ return String(c.id) === String(clientId); });
+  var client = findClientRecord(clientId);
   if (!client) return;
 
   var modal = document.getElementById('match-modal');
@@ -7119,6 +7420,10 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 });
 
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState==='visible'&&currentUser?.role==='advisor') refreshAdvisorClientAccess();
+});
+
 // ════════════════════════════════════════════════
 //  سیستم پیگیری مشتریان
 // ════════════════════════════════════════════════
@@ -7128,33 +7433,52 @@ if(!state.accounting) state.accounting = [];
 if(!state.chatMessages) state.chatMessages = {};
 
 function openEditFollowup(id){
-  const f = state.followups.find(item => sameId(item.id, id));
+  const f = findFollowupRecord(id);
   if(!f) return;
   editingFollowupId = String(f.id);
+  editingFollowupOwnerUid = recordOwnerForCurrentView(f, currentUser.id);
   renderFollowups();
-  setFieldValue('fu-client', f.clientId || ''); setFieldValue('fu-type', f.type || 'call');
+  const linkedClient=(state.clients||[]).find(client=>sameId(client.id,f.clientId)&&clientOwnerId(client)===String(f.clientOwnerId||f._uid||f.userId||''));
+  setFieldValue('fu-client', linkedClient?clientRecordRef(linkedClient):''); setFieldValue('fu-type', f.type || 'call');
   setFieldValue('fu-result', f.result || 'interested'); setFieldValue('fu-notes', f.notes || '');
   setFieldValue('fu-next-date', siteDateForInputOptional(f.nextDate)); setFieldValue('fu-next-time', f.nextTime || '');
   setModalMode('followup-modal', '✏️ ویرایش پیگیری', '💾 ذخیره تغییرات');
   openModal('followup-modal');
 }
 
+function findFollowupRecord(ref){
+  const value=String(ref??'');
+  const split=value.indexOf('::');
+  if(split>=0){
+    try{
+      const owner=decodeURIComponent(value.slice(0,split));
+      const id=decodeURIComponent(value.slice(split+2));
+      return (state.followups||[]).find(item=>String(item.id)===id&&recordOwnerForCurrentView(item,currentUser?.id)===owner)||null;
+    }catch(error){ return null; }
+  }
+  const matches=(state.followups||[]).filter(item=>sameId(item.id,value));
+  if(matches.length<=1) return matches[0]||null;
+  return matches.find(item=>recordOwnerForCurrentView(item,currentUser?.id)===String(currentUser?.id||''))||null;
+}
+
 async function saveFollowup(){
-  const clientId = document.getElementById('fu-client').value;
+  const clientRef = document.getElementById('fu-client').value;
   const nextDateInput = document.getElementById('fu-next-date').value.trim();
   const nextDate = normalizeSiteDate(nextDateInput);
-  if(!clientId){ notify('مشتری را انتخاب کنید','var(--red)'); return; }
+  if(!clientRef){ notify('مشتری را انتخاب کنید','var(--red)'); return; }
   if(nextDateInput && !nextDate){ notify('تاریخ پیگیری بعدی را به شکل ۱۴۰۵/۰۱/۰۱ وارد کنید','var(--red)'); return; }
-  const existing = editingFollowupId ? state.followups.find(item => sameId(item.id, editingFollowupId)) : null;
+  const existing = editingFollowupId ? state.followups.find(item => sameId(item.id, editingFollowupId)&&recordOwnerForCurrentView(item,currentUser.id)===String(editingFollowupOwnerUid||currentUser.id)) : null;
   const isEditing = !!existing;
-  const linkedClient = state.clients.find(c => sameId(c.id, clientId));
+  const linkedClient = findClientRecord(clientRef);
   if(!linkedClient){ notify('مشتری انتخاب‌شده پیدا نشد','var(--red)'); return; }
+  if(!canEditClientRecord(linkedClient)){ notify('ثبت یا ویرایش پیگیری برای پروندهٔ فقط‌خواندنی مجاز نیست','var(--red)'); return; }
   const previousOwnerUid = recordOwnerForCurrentView(existing, currentUser.id);
   const ownerUid = clientActivityOwnerId(linkedClient);
   const fu = {
     ...(existing || {}),
     id: isEditing ? String(existing.id) : String(Date.now()),
-    clientId,
+    clientId:String(linkedClient.id),
+    clientOwnerId:clientActivityOwnerId(linkedClient),
     clientName: linkedClient?.name || '',
     type: document.getElementById('fu-type').value,
     result: document.getElementById('fu-result').value,
@@ -7188,10 +7512,11 @@ async function saveFollowup(){
       } catch(error){ console.warn('Could not close client reminder automatically:', error); }
     }
     if(isEditing){
-      const index = state.followups.findIndex(item => sameId(item.id, fu.id));
+      const index = state.followups.findIndex(item => sameId(item.id, fu.id)&&recordOwnerForCurrentView(item,currentUser.id)===String(previousOwnerUid));
       if(index >= 0) state.followups[index] = fu;
     } else state.followups.unshift(fu);
     editingFollowupId = null;
+    editingFollowupOwnerUid = null;
     closeModal('followup-modal');
     document.getElementById('fu-notes').value = '';
     document.getElementById('fu-next-date').value = '';
@@ -7208,7 +7533,7 @@ function renderFollowups(){
   const sel = document.getElementById('fu-client');
   if(sel && state.clients.length){
     sel.innerHTML = '<option value="">انتخاب مشتری...</option>' +
-      state.clients.map(c => '<option value="'+escapeHTML(String(c.id))+'">'+escapeHTML(c.name||'بدون نام')+'</option>').join('');
+      state.clients.map(c => '<option value="'+escapeHTML(clientRecordRef(c))+'">'+escapeHTML(c.name||'بدون نام')+(isAdmin()&&c.userId?' — '+escapeHTML((state.allUsers||[]).find(user=>String(user.id)===clientOwnerId(c))?.fullname||''):'')+'</option>').join('');
   }
   if(!el) return;
 
@@ -7239,6 +7564,10 @@ function renderFollowups(){
 }
 
 function renderFollowupCard(f, typeLabel, resultLabel, resultColor){
+  const rowOwner=recordOwnerForCurrentView(f,currentUser?.id);
+  const linkedClient=(state.clients||[]).find(client=>sameId(client.id,f.clientId)&&clientOwnerId(client)===String(f.clientOwnerId||rowOwner));
+  const canEdit=!!linkedClient&&canEditClientRecord(linkedClient);
+  const followupRef=`${encodeURIComponent(rowOwner)}::${encodeURIComponent(String(f.id))}`;
   return '<div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px;border:1px solid var(--border);">' +
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">' +
     '<div><b style="font-size:13px;">'+escapeHTML(f.clientName||'مشتری بدون نام')+'</b> &nbsp;<span style="font-size:11px;color:var(--text3);">'+escapeHTML(siteDateDisplay(f.date)||'—')+'</span></div>' +
@@ -7247,20 +7576,22 @@ function renderFollowupCard(f, typeLabel, resultLabel, resultColor){
     '<div style="font-size:12px;color:var(--text2);margin-bottom:6px;">'+escapeHTML((typeLabel[f.type]||f.type||'پیگیری'))+' &nbsp;|&nbsp; '+escapeHTML(f.notes||'—')+'</div>' +
     (f.nextDate ? '<div style="font-size:11px;color:var(--accent);margin-top:4px;">📅 پیگیری بعدی: '+escapeHTML(siteDateDisplay(f.nextDate))+(f.nextTime?' ساعت '+escapeHTML(f.nextTime):'')+'</div>' : '') +
     '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;">' +
-    '<button class="btn btn-ghost btn-sm" data-followup-id="'+escapeHTML(String(f.id))+'" onclick="openEditFollowup(this.dataset.followupId)">✏️ ویرایش</button>' +
-    '<button class="btn btn-danger btn-sm" data-followup-id="'+escapeHTML(String(f.id))+'" onclick="deleteFollowup(this.dataset.followupId)">🗑</button>' +
+    (canEdit?'<button class="btn btn-ghost btn-sm" data-followup-id="'+escapeHTML(followupRef)+'" onclick="openEditFollowup(this.dataset.followupId)">✏️ ویرایش</button>' +
+    '<button class="btn btn-danger btn-sm" data-followup-id="'+escapeHTML(followupRef)+'" onclick="deleteFollowup(this.dataset.followupId)">🗑</button>':'<span class="badge badge-gray">فقط مشاهده</span>') +
     '</div>' +
     '</div>';
 }
 
 async function deleteFollowup(id){
-  const f = state.followups.find(item => sameId(item.id, id));
+  const f = findFollowupRecord(id);
   if(!f) return;
+  const linkedClient=(state.clients||[]).find(client=>sameId(client.id,f.clientId)&&clientOwnerId(client)===String(f.clientOwnerId||f._uid||f.userId||''));
+  if(!linkedClient||!canEditClientRecord(linkedClient)){ notify('حذف پیگیری برای پروندهٔ فقط‌خواندنی مجاز نیست','var(--red)'); return; }
   if(!confirm('این پیگیری حذف شود؟')) return;
-  const ownerUid = f._uid || f.userId || currentUser.id;
+  const ownerUid = recordOwnerForCurrentView(f, currentUser.id);
   try {
-    await _db.doc('users/' + ownerUid + '/followups/' + f.id).delete();
-    state.followups = state.followups.filter(item => !sameId(item.id, f.id));
+    await deleteRecordToOwner('followups',f.id,ownerUid);
+    state.followups = state.followups.filter(item => !(sameId(item.id, f.id)&&recordOwnerForCurrentView(item,currentUser.id)===ownerUid));
     renderFollowups(); updateFollowupBadge();
     notify('پیگیری حذف شد','var(--red)');
   } catch(e){ notify('خطا در حذف پیگیری: '+e.message,'var(--red)'); }
