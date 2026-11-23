@@ -2923,7 +2923,8 @@ async function renderAdminPage(){
         const historyControl=u.role==='advisor'?`<button class="btn btn-ghost btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="openAdvisorClientAccessHistory(this.dataset.userId)">مشاهدهٔ تاریخچه</button>`:'—';
         const roleControl=u.is_primary_admin?'<span class="badge badge-gold">👑 مدیر اصلی · قفل</span>':`<select data-user-id="${escapeHTML(u.id)}" aria-label="نقش ${escapeHTML(u.fullname||'کاربر')}" onchange="changeUserRole(this.dataset.userId,this.value)"><option value="admin" ${u.role==='admin'?'selected':''}>مدیر</option><option value="advisor" ${u.role==='advisor'?'selected':''}>مشاور</option><option value="customer" ${u.role==='customer'?'selected':''}>مشتری</option></select>`;
         const actions=u.is_primary_admin?'<span style="color:var(--text3);font-size:11px;">حساب محافظت‌شده</span>':(u.status==='active'?`<button class="btn btn-danger btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="disableUser(this.dataset.userId)">🚫 غیرفعال</button>`:`<button class="btn btn-primary btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="approveUser(this.dataset.userId)">${u.status==='disabled'?'✅ فعال':'✅ تأیید'}</button>`);
-        return `<tr><td><b>${escapeHTML(u.fullname||'بدون نام')}</b></td><td>${escapeHTML(u.email||'—')}</td><td>${escapeHTML(u.phone||'—')}</td><td>${roleControl}</td><td>${escapeHTML(u.joinDate||'—')}</td><td>${uProps}</td><td>${uClients}</td><td>${uDeals}</td><td>${statusLabel[u.status]||escapeHTML(u.status||'—')}</td><td>${clientAccessControl}</td><td>${historyControl}</td><td style="display:flex;gap:6px;align-items:center;">${actions}${u.is_primary_admin?'':`<button class="btn btn-ghost btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="resetUserPass(this.dataset.userId)" title="بازنشانی رمز">🔑</button>`}</td></tr>`;
+        const deleteControl=currentUser?.is_primary_admin===true&&!u.is_primary_admin&&String(u.id)!==String(currentUser.id)?`<button class="btn btn-danger btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="deleteUserAndTransferRecords(this.dataset.userId,this)" title="حذف دائمی حساب ورود و انتقال پرونده‌ها">🗑 حذف حساب</button>`:'';
+        return `<tr><td><b>${escapeHTML(u.fullname||'بدون نام')}</b></td><td>${escapeHTML(u.email||'—')}</td><td>${escapeHTML(u.phone||'—')}</td><td>${roleControl}</td><td>${escapeHTML(u.joinDate||'—')}</td><td>${uProps}</td><td>${uClients}</td><td>${uDeals}</td><td>${statusLabel[u.status]||escapeHTML(u.status||'—')}</td><td>${clientAccessControl}</td><td>${historyControl}</td><td style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">${actions}${deleteControl}${u.is_primary_admin?'':`<button class="btn btn-ghost btn-sm" data-user-id="${escapeHTML(u.id)}" onclick="resetUserPass(this.dataset.userId)" title="بازنشانی رمز">🔑</button>`}</td></tr>`;
       }).join('')}</tbody></table></div>`:'<div class="empty-state"><div class="icon">👥</div><p>کاربری ثبت‌نام نکرده است</p></div>';
   } catch(error) {
     console.error('Could not render admin users:',error);
@@ -3482,6 +3483,45 @@ async function changeUserRole(userId,role){
   try{ const {error}=await _supabase.rpc('admin_change_user_role',{p_user_id:userId,p_role:role}); if(error) throw error; notify('نقش کاربر تغییر کرد ✅'); await renderAdminPage(); }
   catch(error){ notify('تغییر نقش انجام نشد: '+error.message,'var(--red)'); await renderAdminPage(); }
 }
+
+async function deleteUserAndTransferRecords(userId,button){
+  if(!isAdmin()||currentUser?.is_primary_admin!==true) return;
+  const target=(state.allUsers||[]).find(user=>String(user.id)===String(userId));
+  if(!target||target.is_primary_admin||String(target.id)===String(currentUser.id)){
+    notify('این حساب پیدا نشد یا قابل حذف نیست','var(--red)');
+    return;
+  }
+  const targetLabel=[target.fullname,target.email].filter(Boolean).join(' — ')||'این کاربر';
+  const confirmed=window.confirm(`حذف دائمی حساب «${targetLabel}»\n\nحساب ورود برای همیشه حذف می‌شود؛ پرونده‌های CRM و آگهی‌های این کاربر به مدیر اصلی منتقل و مجوزهای فعال لغو می‌شوند. تاریخچهٔ ممیزی حفظ خواهد شد. اگر سابقهٔ گفتگو یا درخواست مرتبط وجود داشته باشد، سامانه حذف را متوقف می‌کند تا سوابق از بین نرود.\n\nاین کار برگشت‌پذیر نیست. ادامه می‌دهید؟`);
+  if(!confirmed) return;
+  const typed=window.prompt(`برای تأیید نهایی حذف حساب «${targetLabel}»، واژهٔ «حذف» را وارد کنید:`);
+  if(String(typed||'').trim()!=='حذف'){
+    notify('حذف لغو شد؛ عبارت تأیید مطابقت نداشت','var(--accent)');
+    return;
+  }
+  if(button){ button.disabled=true; button.textContent='در حال حذف...'; }
+  try{
+    const {data,error} = await _supabase.rpc('admin_delete_user_transfer_records',{p_user_id:userId});
+    if(error) throw error;
+    try{
+      await loadUserState();
+      await renderAdminPage();
+      updatePendingBadge();
+    }catch(refreshError){
+      console.error('Account was deleted but the admin data refresh failed:',refreshError);
+      notify('حساب حذف و پرونده‌ها منتقل شدند؛ برای تازه‌شدن فهرست، صفحه را بازآوری کنید','var(--accent)');
+      return;
+    }
+    const recordCount=toPersianDigits(String(Number(data?.transferred_records)||0));
+    const listingCount=toPersianDigits(String(Number(data?.transferred_marketplace_listings)||0));
+    notify(`حساب حذف شد؛ ${recordCount} پرونده و ${listingCount} آگهی به مدیر اصلی منتقل شد ✅`,'var(--green)');
+  }catch(error){
+    notify('حذف انجام نشد: '+error.message,'var(--red)');
+  }finally{
+    if(button&&button.isConnected) button.disabled=false;
+  }
+}
+
 let editingPropertyId = null;
 let propertyTitleTouched = false;
 let propertyTitleMode = 'short';
