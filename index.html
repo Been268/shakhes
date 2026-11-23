@@ -1117,6 +1117,7 @@ function profileRef(id){
       </label>
       <div class="auth-form-meta"><button class="auth-link" type="button" onclick="sendPasswordReset()">رمز عبور را فراموش کرده‌اید؟</button></div>
       <div id="login-error" class="auth-error" role="alert" aria-live="polite"></div>
+      <div id="resend-confirmation" class="auth-form-meta" style="display:none;"><button id="resend-confirmation-btn" class="auth-link" type="button" onclick="resendConfirmationEmail()">ارسال دوبارهٔ ایمیل تأیید</button></div>
       <button type="submit" class="btn-primary auth-btn">ورود به سامانه</button>
     </form>
 
@@ -1138,7 +1139,7 @@ function profileRef(id){
     <div id="auth-pending-box" class="auth-pending" style="display:none;">
       <div class="icon">⏳</div>
       <h3>در انتظار تأیید مدیر</h3>
-      <p>درخواست ثبت‌نام شما ارسال شد.<br>پس از تأیید توسط مدیر می‌توانید وارد شوید.</p>
+      <p>درخواست ثبت‌نام شما ارسال شد. ابتدا پیوند تأیید ایمیل را باز کنید؛ سپس پس از تأیید مدیر می‌توانید وارد شوید.</p>
       <button class="auth-btn" style="margin-top:16px;" onclick="switchAuthTab('login')">بازگشت به ورود</button>
     </div>
   </div>
@@ -2452,21 +2453,47 @@ async function doLogin(){
   const email=document.getElementById('login-username').value.trim();
   const password=document.getElementById('login-password').value;
   document.getElementById('login-error').style.display='none';
+  document.getElementById('resend-confirmation').style.display='none';
   if(!email||!password){showLoginError('ایمیل و رمز را وارد کنید');return;}
   const btn=document.querySelector('#auth-login-form .btn-primary');
   if(btn){btn.disabled=true;btn.textContent='...';}
   try {
     await backend().signInWithEmailAndPassword(backend().auth,email,password);
   } catch(e) {
-    showLoginError(e.message||'ورود انجام نشد. ایمیل و رمز را بررسی کنید.');
+    if(e?.code==='email_not_confirmed'){
+      showLoginError('ایمیل این حساب هنوز تأیید نشده است. پیوند تأیید را از صندوق ورودی باز کنید یا ایمیل تأیید را دوباره بفرستید.');
+      document.getElementById('resend-confirmation').style.display='flex';
+    } else {
+      showLoginError(e.message||'ورود انجام نشد. ایمیل و رمز را بررسی کنید.');
+    }
   } finally {
     if(btn){btn.disabled=false;btn.textContent='ورود به سامانه';}
   }
 }
 
-function showLoginError(msg){
+async function resendConfirmationEmail(){
+  const email=document.getElementById('login-username').value.trim();
+  if(!email){showLoginError('ابتدا ایمیل خود را وارد کنید');return;}
+  const btn=document.getElementById('resend-confirmation-btn');
+  if(btn){btn.disabled=true;btn.textContent='در حال ارسال…';}
+  try {
+    const {error}=await _supabase.auth.resend({
+      type:'signup',email,
+      options:{emailRedirectTo:window.location.origin+window.location.pathname}
+    });
+    if(error) throw error;
+    showLoginError('اگر این حساب به تأیید ایمیل نیاز داشته باشد، پیام تأیید ارسال می‌شود. صندوق ورودی و هرزنامه را بررسی کنید.',true);
+  } catch(e){
+    console.error('Confirmation email resend failed:',e);
+    showLoginError('ارسال ایمیل تأیید انجام نشد. چند دقیقه بعد دوباره تلاش کنید یا با مدیر تماس بگیرید.');
+  } finally {
+    if(btn){btn.disabled=false;btn.textContent='ارسال دوبارهٔ ایمیل تأیید';}
+  }
+}
+
+function showLoginError(msg,isSuccess=false){
   const el = document.getElementById('login-error');
-  el.textContent = msg; el.style.display = 'block';
+  el.textContent = msg; el.style.display = 'block'; el.style.color = isSuccess ? '#2f7c4f' : '';
 }
 
 async function doRegister(){
@@ -2539,6 +2566,7 @@ function switchAuthTab(tab){
   document.querySelectorAll('.auth-tab').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.auth-tab')[tab==='login'?0:1].classList.add('active');
   document.getElementById('login-error').style.display = 'none';
+  document.getElementById('resend-confirmation').style.display = 'none';
   document.getElementById('reg-error').style.display = 'none';
   if(tab === 'register') updateRegistrationFields();
 }
