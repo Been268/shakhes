@@ -112,7 +112,7 @@ function profileRef(id){
       const {data:{subscription}}=_supabase.auth.onAuthStateChange((event,session)=>{
         _auth.currentUser=session?.user||null;
         const user=_auth.currentUser?{uid:_auth.currentUser.id,email:_auth.currentUser.email}:null;
-        setTimeout(()=>callback(user),0);
+        setTimeout(()=>callback(user,event),0);
       });
       return ()=>subscription.unsubscribe();
     },
@@ -1119,6 +1119,14 @@ function profileRef(id){
       <div id="login-error" class="auth-error" role="alert" aria-live="polite"></div>
       <div id="resend-confirmation" class="auth-form-meta" style="display:none;"><button id="resend-confirmation-btn" class="auth-link" type="button" onclick="resendConfirmationEmail()">ارسال دوبارهٔ ایمیل تأیید</button></div>
       <button type="submit" class="btn-primary auth-btn">ورود به سامانه</button>
+    </form>
+
+    <form id="auth-recovery-form" class="auth-form" style="display:none;" onsubmit="event.preventDefault();completePasswordRecovery();">
+      <p style="color:var(--text2);font-size:13px;line-height:1.7;margin:0;">برای تکمیل بازیابی، رمز عبور جدید را وارد کنید.</p>
+      <label class="auth-field"><span>رمز عبور جدید (حداقل ۶ کاراکتر)</span><span class="auth-input-shell" dir="ltr"><input type="password" id="recovery-password" autocomplete="new-password" minlength="6" required></span></label>
+      <label class="auth-field"><span>تکرار رمز عبور جدید</span><span class="auth-input-shell" dir="ltr"><input type="password" id="recovery-password-confirm" autocomplete="new-password" minlength="6" required></span></label>
+      <div id="auth-recovery-error" class="auth-error" role="alert" aria-live="polite"></div>
+      <button type="submit" id="auth-recovery-submit" class="btn-primary auth-btn">ذخیرهٔ رمز جدید</button>
     </form>
 
     <!-- register form -->
@@ -2407,6 +2415,8 @@ function profileRef(id){
 //  SUPABASE AUTH & DATA LAYER
 // ============================================================
 let currentUser = null;
+let passwordRecoveryMode = false;
+let passwordRecoveryCompleted = false;
 
 // Supabase client and compatibility adapter are initialized in the document head.
 function backend(){ return window._backend; }
@@ -2463,6 +2473,7 @@ async function doLogin(){
     if(e?.code==='email_not_confirmed'){
       showLoginError('ایمیل این حساب هنوز تأیید نشده است. پیوند تأیید را از صندوق ورودی باز کنید یا ایمیل تأیید را دوباره بفرستید.');
       document.getElementById('resend-confirmation').style.display='flex';
+      renderConfirmationResendCooldown();
     } else {
       showLoginError(e.message||'ورود انجام نشد. ایمیل و رمز را بررسی کنید.');
     }
@@ -2471,23 +2482,72 @@ async function doLogin(){
   }
 }
 
+const CONFIRMATION_RESEND_COOLDOWN_MS=60_000;
+const CONFIRMATION_RESEND_COOLDOWN_KEY='shakhes.confirmationResendCooldownUntil';
+let confirmationResendCooldownTimer=null;
+
+function renderConfirmationResendCooldown(){
+  const btn=document.getElementById('resend-confirmation-btn');
+  if(!btn) return;
+  if(confirmationResendCooldownTimer){clearInterval(confirmationResendCooldownTimer);confirmationResendCooldownTimer=null;}
+  let until=0;
+  try { until=Number(sessionStorage.getItem(CONFIRMATION_RESEND_COOLDOWN_KEY))||0; } catch(_) {}
+  const update=()=>{
+    const secondsLeft=Math.max(0,Math.ceil((until-Date.now())/1000));
+    btn.disabled=secondsLeft>0;
+    btn.textContent=secondsLeft>0?`ارسال دوباره پس از ${toPersianDigits(String(secondsLeft))} ثانیه`:'ارسال دوبارهٔ ایمیل تأیید';
+    if(secondsLeft===0){
+      try { sessionStorage.removeItem(CONFIRMATION_RESEND_COOLDOWN_KEY); } catch(_) {}
+      return false;
+    }
+    return true;
+  };
+  if(update()) confirmationResendCooldownTimer=setInterval(()=>{
+    if(!update()){
+      clearInterval(confirmationResendCooldownTimer);
+      confirmationResendCooldownTimer=null;
+    }
+  },1000);
+}
+
+function startConfirmationResendCooldown(duration=CONFIRMATION_RESEND_COOLDOWN_MS){
+  const until=Date.now()+duration;
+  try { sessionStorage.setItem(CONFIRMATION_RESEND_COOLDOWN_KEY,String(until)); } catch(_) {}
+  renderConfirmationResendCooldown();
+}
+
+function confirmationResendErrorMessage(error){
+  if(error?.code==='over_email_send_rate_limit'||Number(error?.status)===429){
+    return 'محدودیت ارسال ایمیل فعال شده است؛ این درخواست ایمیلی نفرستاد. چند دقیقه صبر کنید و سپس فقط یک‌بار دوباره تلاش کنید.';
+  }
+  if(error?.code==='redirect_to_not_allowed'){
+    return 'نشانی بازگشت لینک تأیید در تنظیمات Supabase مجاز نیست؛ مدیر باید فهرست Redirect URLs را بررسی کند.';
+  }
+  return 'ارسال ایمیل تأیید انجام نشد. لطفاً کمی بعد دوباره تلاش کنید یا تنظیمات ایمیل Supabase را بررسی کنید.';
+}
+
 async function resendConfirmationEmail(){
   const email=document.getElementById('login-username').value.trim();
   if(!email){showLoginError('ابتدا ایمیل خود را وارد کنید');return;}
   const btn=document.getElementById('resend-confirmation-btn');
+  if(btn?.disabled) return;
   if(btn){btn.disabled=true;btn.textContent='در حال ارسال…';}
+  let cooldownMs=0;
   try {
     const {error}=await _supabase.auth.resend({
       type:'signup',email,
       options:{emailRedirectTo:window.location.origin+window.location.pathname}
     });
     if(error) throw error;
+    cooldownMs=CONFIRMATION_RESEND_COOLDOWN_MS;
     showLoginError('اگر این حساب به تأیید ایمیل نیاز داشته باشد، پیام تأیید ارسال می‌شود. صندوق ورودی و هرزنامه را بررسی کنید.',true);
   } catch(e){
     console.error('Confirmation email resend failed:',e);
-    showLoginError('ارسال ایمیل تأیید انجام نشد. چند دقیقه بعد دوباره تلاش کنید یا با مدیر تماس بگیرید.');
+    if(e?.code==='over_email_send_rate_limit'||Number(e?.status)===429) cooldownMs=5*60*1000;
+    showLoginError(confirmationResendErrorMessage(e));
   } finally {
-    if(btn){btn.disabled=false;btn.textContent='ارسال دوبارهٔ ایمیل تأیید';}
+    if(cooldownMs>0) startConfirmationResendCooldown(cooldownMs);
+    else if(btn){btn.disabled=false;btn.textContent='ارسال دوبارهٔ ایمیل تأیید';}
   }
 }
 
@@ -2554,6 +2614,49 @@ async function sendPasswordReset(){
   }
 }
 
+function showPasswordRecoveryForm(){
+  document.getElementById('auth-login-form').style.display='none';
+  document.getElementById('auth-register-form').style.display='none';
+  document.getElementById('auth-pending-box').style.display='none';
+  document.getElementById('auth-tabs').style.display='none';
+  document.getElementById('recovery-password').value='';
+  document.getElementById('recovery-password-confirm').value='';
+  document.getElementById('auth-recovery-error').style.display='none';
+  document.getElementById('auth-recovery-form').style.display='flex';
+  document.getElementById('auth-form-title').textContent='تعیین رمز عبور جدید';
+  document.getElementById('auth-form-subtitle').textContent='برای ورود دوباره، رمز تازه‌ای برای حساب خود انتخاب کنید.';
+}
+
+function showPasswordRecoveryError(message,isSuccess=false){
+  const el=document.getElementById('auth-recovery-error');
+  el.textContent=message;
+  el.style.display='block';
+  el.style.color=isSuccess?'#2f7c4f':'';
+}
+
+async function completePasswordRecovery(){
+  const password=document.getElementById('recovery-password').value;
+  const confirmation=document.getElementById('recovery-password-confirm').value;
+  const button=document.getElementById('auth-recovery-submit');
+  if(password.length<6){showPasswordRecoveryError('رمز جدید باید حداقل ۶ کاراکتر باشد.');return;}
+  if(password!==confirmation){showPasswordRecoveryError('رمز عبور و تکرار آن یکسان نیستند.');return;}
+  button.disabled=true;
+  button.textContent='در حال ذخیره…';
+  try {
+    const {error}=await _supabase.auth.updateUser({password});
+    if(error) throw error;
+    passwordRecoveryCompleted=true;
+    await backend().signOut(backend().auth);
+  } catch(error){
+    showPasswordRecoveryError(passwordRecoveryCompleted
+      ? 'رمز تغییر کرد، اما خروج خودکار انجام نشد. لطفاً دوباره تلاش کنید.'
+      : (error.message||'تغییر رمز انجام نشد؛ ممکن است پیوند بازیابی منقضی شده باشد.'));
+  } finally {
+    button.disabled=false;
+    button.textContent='ذخیرهٔ رمز جدید';
+  }
+}
+
 function switchAuthTab(tab){
   const title = document.getElementById('auth-form-title');
   const subtitle = document.getElementById('auth-form-subtitle');
@@ -2561,6 +2664,7 @@ function switchAuthTab(tab){
   if(subtitle) subtitle.textContent = tab==='login' ? 'برای ادامه، وارد حساب کاربری خود شوید.' : 'درخواست همکاری خود را برای بررسی مدیر ارسال کنید.';
   document.getElementById('auth-login-form').style.display   = tab==='login'    ? 'flex' : 'none';
   document.getElementById('auth-register-form').style.display= tab==='register' ? 'flex' : 'none';
+  document.getElementById('auth-recovery-form').style.display='none';
   document.getElementById('auth-pending-box').style.display  = 'none';
   document.getElementById('auth-tabs').style.display         = 'flex';
   document.querySelectorAll('.auth-tab').forEach(b => b.classList.remove('active'));
@@ -5665,9 +5769,9 @@ function renderProperties(){
     <td data-label="نوع ملک">${escapeHTML(p.type)}</td>
     <td data-label="متراژ">${p.extra&&p.extra.area?escapeHTML(p.extra.area)+' م²':(p.extra&&p.extra.land?escapeHTML(p.extra.land)+' م²':'—')}</td>
     <td data-label="قیمت" style="color:var(--accent)">${propertyPriceHTML(p)}</td>
-    <td data-label="وضعیت ملک">${statusMap[p.status]||p.status}</td>
+    <td data-label="وضعیت ملک">${escapeHTML(statusMap[p.status]||p.status||'—')}</td>
     <td data-label="تأیید">
-      ${approvalMap[approval]||approval}
+      ${escapeHTML(approvalMap[approval]||approval||'—')}
       ${isAdmin && approval==='pending' ? `
         <div style="display:flex;gap:4px;margin-top:4px;">
           <button class="btn btn-sm" style="background:#0b4a2e;color:#4ade80;font-size:11px;padding:3px 8px;" data-property-id="${escapeHTML(String(p.id))}" onclick="setApproval(this.dataset.propertyId,'approved')">✅ تایید</button>
@@ -5868,7 +5972,9 @@ async function deleteProp(id){
         }
       }
     }
-    await _deleteDoc('properties', id);
+    if(!prop){ notify('ملک پیدا نشد','var(--red)'); return; }
+    const ownerUid=prop._uid||prop.userId||currentUser.id;
+    await deleteRecordToOwner('properties',id,ownerUid);
     state.properties = state.properties.filter(p=>!sameId(p.id, id));
     renderProperties(); updateCounts();
     notify('ملک حذف شد','var(--red)');
@@ -7133,11 +7239,19 @@ function renderRemindersList(){
   `).join('');
 }
 
-function deleteReminder(id){
-  state.reminders = state.reminders.filter(r=>!sameId(r.id, id));
-  save('reminders', state.reminders);
-  renderCalendar();
-  notify('یادآوری حذف شد','var(--red)');
+async function deleteReminder(id){
+  const reminder=state.reminders.find(item=>sameId(item.id,id));
+  if(!reminder) return;
+  const ownerUid=reminder._uid||reminder.userId||currentUser.id;
+  try {
+    await deleteRecordToOwner('reminders',id,ownerUid);
+    state.reminders=state.reminders.filter(item=>!sameId(item.id,id));
+    renderCalendar();
+    renderRemindersList();
+    notify('یادآوری حذف شد','var(--red)');
+  } catch(error){
+    notify('خطا در حذف یادآوری: '+(error.message||'عملیات انجام نشد'),'var(--red)');
+  }
 }
 
 // --- DASHBOARD ---
@@ -7354,11 +7468,29 @@ function matchProperties(clientId) {
 
 // Auth state listener (placed here so all functions are defined)
 let authLoadSequence = 0;
-_auth.onAuthStateChanged(async function(authUser) {
+_auth.onAuthStateChanged(async function(authUser,authEvent) {
   const loadSequence=++authLoadSequence;
   currentUser=null;
   showAuthScreen();
   clearPrivateSessionState();
+  if(authEvent==='PASSWORD_RECOVERY'){
+    passwordRecoveryMode=true;
+    passwordRecoveryCompleted=false;
+    showPasswordRecoveryForm();
+    return;
+  }
+  if(passwordRecoveryMode){
+    if(!authUser){
+      passwordRecoveryMode=false;
+      document.getElementById('auth-recovery-form').style.display='none';
+      switchAuthTab('login');
+      if(passwordRecoveryCompleted){
+        showLoginError('رمز عبور با موفقیت تغییر کرد؛ اکنون با رمز جدید وارد شوید.',true);
+        passwordRecoveryCompleted=false;
+      }
+    }
+    return;
+  }
   if (authUser) {
     try {
       const snap = await _db.doc('users/' + authUser.uid).get();
