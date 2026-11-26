@@ -4924,11 +4924,20 @@ function canManagePrivatePropertyDocuments(){
   return isAdmin() && currentUser?.status === 'active';
 }
 
-function propertyPrivateDocumentFolder(property){
+async function propertyPrivateDocumentFolder(property){
   const ownerUid=String(property?._uid||property?.userId||'').trim().replace(/[^a-zA-Z0-9._-]/g,'_');
   const propertyId=String(property?.id??'').replace(/[^a-zA-Z0-9._-]/g,'_');
   if(!ownerUid||!propertyId||ownerUid==='.'||ownerUid==='..'||propertyId==='.'||propertyId==='..') return '';
-  return `properties/${ownerUid}/${propertyId}/documents`;
+  const currentOwnerId=String(property?._uid||property?.userId||'').trim();
+  const {data,error}=await _supabase.rpc('resolve_property_private_document_storage_owner',{
+    p_property_record_id:String(property.id),
+    p_current_owner_id:currentOwnerId,
+    p_candidate_owner_id:ownerUid
+  });
+  if(error) throw error;
+  const storageOwnerUid=String(data||'').trim().replace(/[^a-zA-Z0-9._-]/g,'_');
+  if(!storageOwnerUid||storageOwnerUid==='.'||storageOwnerUid==='..') throw new Error('شناسهٔ مسیر امن مدارک معتبر نیست');
+  return `properties/${storageOwnerUid}/${propertyId}/documents`;
 }
 
 function safePropertyPrivateDocumentName(name){
@@ -4963,11 +4972,11 @@ async function loadPropertyPrivateDocuments(property,statusMessage=''){
   const panel=document.getElementById('property-private-documents');
   if(!panel||String(panel.dataset.propertyId)!==String(property?.id)) return;
   const requestId=++propertyPrivateDocumentsRequestId;
-  const folder=propertyPrivateDocumentFolder(property);
   const list=document.getElementById('property-private-document-list');
   if(list) list.textContent='در حال دریافت فهرست مدارک خصوصی…';
-  if(!folder){ setPropertyPrivateDocumentsStatus('شناسهٔ مالک این فایل در دسترس نیست.',true); return; }
   try {
+    const folder=await propertyPrivateDocumentFolder(property);
+    if(!folder){ setPropertyPrivateDocumentsStatus('شناسهٔ مالک این فایل در دسترس نیست.',true); return; }
     const result=await _supabase.storage.from(PROPERTY_PRIVATE_DOCUMENT_BUCKET).list(folder,{limit:100,offset:0});
     if(result.error) throw result.error;
     const currentPanel=document.getElementById('property-private-documents');
@@ -4988,7 +4997,7 @@ async function loadPropertyPrivateDocuments(property,statusMessage=''){
     const currentPanel=document.getElementById('property-private-documents');
     if(requestId!==propertyPrivateDocumentsRequestId||!canManagePrivatePropertyDocuments()||!currentPanel||String(currentPanel.dataset.propertyId)!==String(property.id)) return;
     if(list) list.innerHTML='<div style="font-size:11px;color:var(--red);padding:8px 0;">فهرست مدارک خصوصی بارگذاری نشد.</div>';
-    setPropertyPrivateDocumentsStatus('مخزن خصوصی آماده نیست یا دسترسی مدیر هنوز فعال نشده است.',true);
+    setPropertyPrivateDocumentsStatus('بازیابی مسیر مدارک خصوصی ناموفق بود؛ مهاجرت همگام‌سازی یا دسترسی مدیر را بررسی کنید.',true);
   }
 }
 
@@ -5004,7 +5013,9 @@ async function uploadPropertyPrivateDocuments(input){
     setPropertyPrivateDocumentsStatus(`در هر نوبت حداکثر ${toPersianDigits(String(PROPERTY_PRIVATE_DOCUMENT_MAX_BATCH))} فایل انتخاب کنید.`,true);
     return;
   }
-  const folder=propertyPrivateDocumentFolder(property);
+  let folder='';
+  try { folder=await propertyPrivateDocumentFolder(property); }
+  catch(error){ console.warn('Could not resolve private property document folder:',error); setPropertyPrivateDocumentsStatus('مسیر امن مدارک پیدا نشد؛ همگام‌سازی دسترسی را بررسی کنید.',true); return; }
   if(!folder){ setPropertyPrivateDocumentsStatus('شناسهٔ مالک این فایل در دسترس نیست.',true); return; }
   const valid=[];
   const rejected=[];
@@ -5043,11 +5054,12 @@ async function downloadPropertyPrivateDocument(path,name){
   if(!canManagePrivatePropertyDocuments()) return;
   const panel=document.getElementById('property-private-documents');
   const property=state.properties.find(item=>sameId(item.id,String(panel?.dataset.propertyId||'')));
-  const folder=propertyPrivateDocumentFolder(property);
   const filePath=String(path||'');
-  if(!panel||!folder||!filePath.startsWith(folder+'/')) return;
+  if(!panel||!property) return;
   setPropertyPrivateDocumentsStatus('در حال دریافت امن مدرک…');
   try {
+    const folder=await propertyPrivateDocumentFolder(property);
+    if(!folder||!filePath.startsWith(folder+'/')) return;
     const result=await _supabase.storage.from(PROPERTY_PRIVATE_DOCUMENT_BUCKET).download(filePath);
     if(result.error) throw result.error;
     const objectUrl=URL.createObjectURL(result.data);
@@ -5070,11 +5082,12 @@ async function deletePropertyPrivateDocument(path,name){
   if(!canManagePrivatePropertyDocuments()) return;
   const panel=document.getElementById('property-private-documents');
   const property=state.properties.find(item=>sameId(item.id,String(panel?.dataset.propertyId||'')));
-  const folder=propertyPrivateDocumentFolder(property);
   const filePath=String(path||'');
-  if(!panel||!folder||!filePath.startsWith(folder+'/')) return;
-  if(!confirm(`مدرک خصوصی «${String(name||'مدرک').replace(/[\r\n]/g,' ').slice(0,100)}» حذف شود؟ این کار قابل بازگشت نیست.`)) return;
+  if(!panel||!property) return;
   try {
+    const folder=await propertyPrivateDocumentFolder(property);
+    if(!folder||!filePath.startsWith(folder+'/')) return;
+    if(!confirm(`مدرک خصوصی «${String(name||'مدرک').replace(/[\r\n]/g,' ').slice(0,100)}» حذف شود؟ این کار قابل بازگشت نیست.`)) return;
     const result=await _supabase.storage.from(PROPERTY_PRIVATE_DOCUMENT_BUCKET).remove([filePath]);
     if(result.error) throw result.error;
     await loadPropertyPrivateDocuments(property,'مدرک خصوصی حذف شد.');
