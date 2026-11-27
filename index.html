@@ -5816,9 +5816,9 @@ function renderProperties(){
     <td data-label="نوع ملک">${escapeHTML(p.type)}</td>
     <td data-label="متراژ">${p.extra&&p.extra.area?escapeHTML(p.extra.area)+' م²':(p.extra&&p.extra.land?escapeHTML(p.extra.land)+' م²':'—')}</td>
     <td data-label="قیمت" style="color:var(--accent)">${propertyPriceHTML(p)}</td>
-    <td data-label="وضعیت ملک">${escapeHTML(statusMap[p.status]||p.status||'—')}</td>
+    <td data-label="وضعیت ملک">${statusMap[p.status]||escapeHTML(p.status||'—')}</td>
     <td data-label="تأیید">
-      ${escapeHTML(approvalMap[approval]||approval||'—')}
+      ${approvalMap[approval]||escapeHTML(approval||'—')}
       ${isAdmin && approval==='pending' ? `
         <div style="display:flex;gap:4px;margin-top:4px;">
           <button class="btn btn-sm" style="background:#0b4a2e;color:#4ade80;font-size:11px;padding:3px 8px;" data-property-id="${escapeHTML(String(p.id))}" onclick="setApproval(this.dataset.propertyId,'approved')">✅ تایید</button>
