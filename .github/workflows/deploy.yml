@@ -31,6 +31,8 @@ jobs:
         run: |
           mkdir -p dist
           cp index.html dist/index.html
+          cp manifest.webmanifest sw.js manus-routes.json dist/
+          cp -r icons dist/icons
           touch dist/.nojekyll
 
       - name: Upload Pages artifact

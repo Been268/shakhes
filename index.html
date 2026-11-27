@@ -2,7 +2,14 @@
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#161b22">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="شاخص">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/icon-192.svg">
 <title>املاک شاخص</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23161b22'/%3E%3Cpath d='M18 48 50 20l32 28v34H58V61H42v21H18z' fill='%23e8a838'/%3E%3C/svg%3E">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -1042,9 +1049,36 @@ function profileRef(id){
   }
   @media(prefers-reduced-motion:reduce) {.auth-btn,.auth-input-shell {transition:none}}
 </style>
+<style id="pwa-mobile-layer">
+  .pwa-install-banner {
+    position: fixed; right: 12px; left: 12px; bottom: calc(82px + env(safe-area-inset-bottom));
+    z-index: 1200; display: none; align-items: center; gap: 10px; padding: 12px 14px;
+    border: 1px solid rgba(232,168,56,.38); border-radius: 16px; background: rgba(22,27,34,.97);
+    box-shadow: 0 12px 34px rgba(0,0,0,.42); backdrop-filter: blur(16px);
+  }
+  .pwa-install-banner.show { display: flex; animation: pwaBannerIn .22s ease-out both; }
+  .pwa-install-icon { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 10px; }
+  .pwa-install-copy { min-width: 0; flex: 1; }
+  .pwa-install-copy strong { display:block; font-size: 12px; color: var(--text); }
+  .pwa-install-copy span { display:block; margin-top: 3px; color: var(--text2); font-size: 10px; line-height: 1.5; }
+  .pwa-install-btn, .pwa-install-dismiss { border: 0; font-family: inherit; cursor: pointer; }
+  .pwa-install-btn { padding: 9px 12px; border-radius: 10px; background: var(--accent); color: #111; font-weight: 800; font-size: 11px; white-space: nowrap; }
+  .pwa-install-dismiss { padding: 6px; background: transparent; color: var(--text3); font-size: 16px; }
+  .pwa-offline-bar { position: fixed; top: 0; right: 0; left: 0; z-index: 1300; display:none; padding: 7px 12px; text-align:center; background:#8d2f2f; color:#fff; font-size:11px; }
+  .pwa-offline-bar.show { display:block; }
+  @keyframes pwaBannerIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  @media (min-width:769px) { .pwa-install-banner { left:auto; max-width:390px; bottom:24px; } }
+</style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
 <body>
+<div class="pwa-offline-bar" id="pwa-offline-bar">اتصال اینترنت برقرار نیست؛ اطلاعات جدید از سامانه دریافت نمی‌شود.</div>
+<div class="pwa-install-banner" id="pwa-install-banner" role="dialog" aria-label="نصب برنامه املاک شاخص">
+  <img class="pwa-install-icon" src="./icons/icon-192.svg" alt="">
+  <div class="pwa-install-copy"><strong>املاک شاخص را نصب کنید</strong><span>دسترسی سریع‌تر و اجرای تمام‌صفحه روی موبایل</span></div>
+  <button class="pwa-install-btn" id="pwa-install-btn" type="button">نصب</button>
+  <button class="pwa-install-dismiss" id="pwa-install-dismiss" type="button" aria-label="بستن">×</button>
+</div>
 <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeMobileMenu()"></div>
 
 <!-- Bottom Navigation موبایل -->
@@ -8399,6 +8433,31 @@ function printContract(){
 </div>
 
 <div class="footer">این قرارداد در ۲ نسخه تنظیم و هر دو نسخه از اعتبار یکسان برخوردار است — آژانس املاک شاخص</div>
+<script>
+(function(){
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  let deferredPrompt = null;
+  const banner = document.getElementById('pwa-install-banner');
+  const installBtn = document.getElementById('pwa-install-btn');
+  const dismissBtn = document.getElementById('pwa-install-dismiss');
+  window.addEventListener('beforeinstallprompt', event => {
+    event.preventDefault(); deferredPrompt = event;
+    if (!isStandalone && sessionStorage.getItem('shakhes-install-dismissed') !== '1') banner?.classList.add('show');
+  });
+  installBtn?.addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    deferredPrompt = null; banner?.classList.remove('show');
+  });
+  dismissBtn?.addEventListener('click', () => { sessionStorage.setItem('shakhes-install-dismissed','1'); banner?.classList.remove('show'); });
+  window.addEventListener('appinstalled', () => { banner?.classList.remove('show'); deferredPrompt = null; });
+  const offlineBar = document.getElementById('pwa-offline-bar');
+  const syncConnection = () => offlineBar?.classList.toggle('show', !navigator.onLine);
+  window.addEventListener('online', syncConnection); window.addEventListener('offline', syncConnection); syncConnection();
+  if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js', {scope:'./'}).catch(() => {}));
+})();
+</script>
 </body>
 </html>`;
 
