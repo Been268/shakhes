@@ -8433,31 +8433,6 @@ function printContract(){
 </div>
 
 <div class="footer">این قرارداد در ۲ نسخه تنظیم و هر دو نسخه از اعتبار یکسان برخوردار است — آژانس املاک شاخص</div>
-<script>
-(function(){
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-  let deferredPrompt = null;
-  const banner = document.getElementById('pwa-install-banner');
-  const installBtn = document.getElementById('pwa-install-btn');
-  const dismissBtn = document.getElementById('pwa-install-dismiss');
-  window.addEventListener('beforeinstallprompt', event => {
-    event.preventDefault(); deferredPrompt = event;
-    if (!isStandalone && sessionStorage.getItem('shakhes-install-dismissed') !== '1') banner?.classList.add('show');
-  });
-  installBtn?.addEventListener('click', async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    await deferredPrompt.userChoice;
-    deferredPrompt = null; banner?.classList.remove('show');
-  });
-  dismissBtn?.addEventListener('click', () => { sessionStorage.setItem('shakhes-install-dismissed','1'); banner?.classList.remove('show'); });
-  window.addEventListener('appinstalled', () => { banner?.classList.remove('show'); deferredPrompt = null; });
-  const offlineBar = document.getElementById('pwa-offline-bar');
-  const syncConnection = () => offlineBar?.classList.toggle('show', !navigator.onLine);
-  window.addEventListener('online', syncConnection); window.addEventListener('offline', syncConnection); syncConnection();
-  if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js', {scope:'./'}).catch(() => {}));
-})();
-</script>
 </body>
 </html>`;
 
@@ -8663,5 +8638,31 @@ data.forEach(function(d){L.marker([d[0],d[1]]).addTo(map).bindPopup(d[2]);});
     <div id="match-results"></div>
   </div>
 </div>
+
+<script>
+(function(){
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  let deferredPrompt = null;
+  const banner = document.getElementById('pwa-install-banner');
+  const installBtn = document.getElementById('pwa-install-btn');
+  const dismissBtn = document.getElementById('pwa-install-dismiss');
+  window.addEventListener('beforeinstallprompt', event => {
+    event.preventDefault(); deferredPrompt = event;
+    if (!isStandalone && sessionStorage.getItem('shakhes-install-dismissed') !== '1') banner?.classList.add('show');
+  });
+  installBtn?.addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    deferredPrompt = null; banner?.classList.remove('show');
+  });
+  dismissBtn?.addEventListener('click', () => { sessionStorage.setItem('shakhes-install-dismissed','1'); banner?.classList.remove('show'); });
+  window.addEventListener('appinstalled', () => { banner?.classList.remove('show'); deferredPrompt = null; });
+  const offlineBar = document.getElementById('pwa-offline-bar');
+  const syncConnection = () => offlineBar?.classList.toggle('show', !navigator.onLine);
+  window.addEventListener('online', syncConnection); window.addEventListener('offline', syncConnection); syncConnection();
+  if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js', {scope:'./'}).catch(() => {}));
+})();
+</script>
 </body>
 </html>
