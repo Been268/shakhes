@@ -1893,7 +1893,7 @@ function profileRef(id){
         </div>
         <div class="form-group full">
           <label>عنوان نمایشی ملک</label>
-          <input type="text" id="p-title" placeholder="مثال: آپارتمان ۱۲۰ متری، ۲ خوابه برای فروش" oninput="propertyTitleTouched=true">
+          <input type="text" id="p-title" placeholder="مثال: آپارتمان ۱۲۰ متری، ۲ خوابه برای فروش" oninput="propertyTitleTouched=true;renderPropertyDuplicateWarning()">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:8px;">
             <small id="p-title-hint" style="color:var(--text2);">عنوان پیشنهادی از مشخصات غیرحساس ملک ساخته می‌شود؛ آدرس دقیق و اطلاعات مالک درج نمی‌شود.</small>
             <div style="display:flex;gap:6px;">
@@ -1910,7 +1910,7 @@ function profileRef(id){
         <!-- فیلد قیمت فروش -->
         <div class="form-group" id="price-sale-wrap">
           <label>قیمت فروش (تومان)</label>
-          <input type="text" id="p-price" inputmode="numeric" autocomplete="off" placeholder="0" oninput="propertyPriceTouched=true">
+          <input type="text" id="p-price" inputmode="numeric" autocomplete="off" placeholder="0" oninput="propertyPriceTouched=true;renderPropertyDuplicateWarning()">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:7px;">
             <small id="p-total-price-hint" style="color:var(--text2);">با وارد کردن متراژ، تغییر قیمت کل یا قیمت هر متر باعث محاسبه مقدار دیگر می‌شود.</small>
             <button type="button" id="p-total-price-reset" class="btn btn-ghost btn-sm" style="display:none;" onclick="useCalculatedPropertyPrice()">استفاده از قیمت محاسبه‌شده</button>
@@ -1932,12 +1932,13 @@ function profileRef(id){
         </div>
           <div class="form-group">
             <label>شماره تماس مالک</label>
-            <input type="text" id="p-owner-phone" placeholder="09..." oninput="renderPropertyOwnerPhoneDuplicateWarning()">
+            <input type="text" id="p-owner-phone" placeholder="09..." oninput="renderPropertyOwnerPhoneDuplicateWarning();renderPropertyDuplicateWarning()">
           </div>
           <div id="p-owner-phone-duplicate-warning" class="form-group full" role="status" aria-live="polite" style="display:none;font-size:11px;line-height:1.8;padding:10px 12px;border:1px solid rgba(232,168,56,.4);border-radius:10px;background:rgba(232,168,56,.08);color:var(--text2);"></div>
+          <div id="p-property-duplicate-warning" class="form-group full" role="status" aria-live="polite" style="display:none;font-size:11px;line-height:1.8;padding:10px 12px;border:1px solid rgba(232,168,56,.4);border-radius:10px;background:rgba(232,168,56,.08);color:var(--text2);"></div>
           <div class="form-group full">
             <label>آدرس دقیق ملک</label>
-            <input type="text" id="p-address" placeholder="استان، شهر، محله، خیابان و پلاک">
+            <input type="text" id="p-address" placeholder="استان، شهر، محله، خیابان و پلاک" oninput="renderPropertyDuplicateWarning()">
           </div>
           <div class="form-group">
             <label>عرض جغرافیایی (اختیاری)</label>
@@ -1954,7 +1955,7 @@ function profileRef(id){
         <div style="border-top:1px solid var(--border);margin:14px 0;"></div>
         <div style="font-size:12px;color:var(--accent);margin-bottom:10px;font-weight:700;">📐 مشخصات آپارتمان</div>
         <div class="form-grid">
-          <div class="form-group"><label>متراژ (م²)</label><input type="number" id="p-area" placeholder="0"></div>
+          <div class="form-group"><label>متراژ (م²)</label><input type="number" id="p-area" placeholder="0" oninput="renderPropertyDuplicateWarning()"></div>
           <div class="form-group"><label>تعداد اتاق</label><input type="number" id="p-rooms" placeholder="0"></div>
           <div class="form-group"><label>طبقه</label><input type="number" id="p-floor" placeholder="0"></div>
           <div class="form-group"><label>تعداد کل طبقات</label><input type="number" id="p-total-floors" placeholder="0"></div>
@@ -1972,7 +1973,7 @@ function profileRef(id){
           <div class="form-group"><label>تعداد حمام</label><select id="p-bath"><option value="0">ندارد</option><option value="1">۱ عدد</option><option value="2">۲ عدد</option><option value="3">۳ عدد</option></select></div>
           <div class="form-group"><label>بالکن</label><select id="p-balcony"><option value="">ندارد</option><option>۱ بالکن</option><option>۲ بالکن</option><option>۳ بالکن</option></select></div>
           <div class="form-group"><label>تراس</label><select id="p-terrace"><option value="">ندارد</option><option>دارد - کوچک</option><option>دارد - بزرگ</option></select></div>
-          <div class="form-group"><label>قیمت هر متر (تومان)</label><input type="text" inputmode="numeric" id="p-price-per-m" placeholder="0" autocomplete="off"></div>
+          <div class="form-group"><label>قیمت هر متر (تومان)</label><input type="text" inputmode="numeric" id="p-price-per-m" placeholder="0" autocomplete="off" oninput="renderPropertyDuplicateWarning()"></div>
           <div class="form-group full"><label>امکانات ویژه</label><input type="text" id="p-features" placeholder="مثال: کابینت MDF، کف پارکت، سیستم هوشمند، ..."></div>
         </div>
       </div>
@@ -2943,6 +2944,85 @@ function renderPropertyOwnerPhoneDuplicateWarning(){
   const rows=matches.slice(0,4).map(property=>`<li>${escapeHTML(String(property.title||'ملک بدون عنوان').replace(/\s+/g,' ').slice(0,90))}</li>`).join('');
   const more=matches.length>4?`<li>و ${toPersianDigits(String(matches.length-4))} فایل دیگر</li>`:'';
   box.innerHTML=`⚠️ شمارهٔ تماس این مالک در ${toPersianDigits(String(matches.length))} فایلِ قابل‌مشاهدهٔ دیگر هم ثبت شده است. ممکن است یک مالک چند ملک داشته باشد؛ عنوان فایل‌ها را بررسی کنید.<ul style="margin:5px 0 0;padding-right:20px;">${rows}${more}</ul>`;
+  box.style.display='block';
+  return matches;
+}
+
+function normalizePropertyDuplicateText(value){
+  return String(value??'').toLocaleLowerCase()
+    .replace(/[يى]/g,'ی').replace(/ك/g,'ک')
+    .replace(/[۰-۹٠-٩]/g,'')
+    .replace(/[،,؛;|/\\()[\]{}:،.!؟?_-]+/g,' ')
+    .replace(/\s+/g,' ').trim();
+}
+
+function propertyDuplicateTokens(value){
+  const ignored=new Set(['استان','شهر','منطقه','محله','خیابان','بلوار','کوچه','پلاک','واحد','ملک','برای','فروش','اجاره']);
+  return new Set(normalizePropertyDuplicateText(value).split(' ').filter(token=>token.length>1&&!ignored.has(token)));
+}
+
+function propertyDuplicateTokenSimilarity(a,b){
+  const left=propertyDuplicateTokens(a), right=propertyDuplicateTokens(b);
+  if(!left.size||!right.size) return 0;
+  let common=0; left.forEach(token=>{ if(right.has(token)) common++; });
+  return common/Math.max(left.size,right.size);
+}
+
+function propertyDuplicateDraft(){
+  const extra={};
+  document.querySelectorAll('#prop-step2 input, #prop-step2 select, #prop-step2 textarea').forEach(el=>{
+    if(el.id) extra[el.id]=el.id.startsWith('p-')&&PROPERTY_AMOUNT_IDS.has(el.id)?rawAmountValue(el.value):el.value;
+  });
+  return {
+    id:editingPropertyId||'', type:currentPropType, title:document.getElementById('p-title')?.value||'',
+    address:document.getElementById('p-address')?.value||'', ownerPhone:document.getElementById('p-owner-phone')?.value||'',
+    status:document.getElementById('p-status')?.value||'', price:rawAmountValue(document.getElementById('p-price')?.value||''),
+    mortgage:rawAmountValue(document.getElementById('p-mortgage')?.value||''), extra
+  };
+}
+
+function propertyDuplicatePriceMatch(left,right){
+  const a=getPropPrice(left), b=getPropPrice(right);
+  return a>0&&b>0&&Math.abs(a-b)/Math.max(a,b)<=0.08;
+}
+
+function propertyDuplicateAreaMatch(left,right){
+  const a=getPropArea(left), b=getPropArea(right);
+  return a>0&&b>0&&Math.abs(a-b)/Math.max(a,b)<=0.08;
+}
+
+function findDuplicateProperties(property){
+  const phone=normalizePhoneForDuplicate(propertyOwnerPhoneValue(property));
+  return (state.properties||[]).map(candidate=>{
+    if(sameId(candidate.id,property.id)) return false;
+    const candidatePhone=normalizePhoneForDuplicate(propertyOwnerPhoneValue(candidate));
+    const phoneMatch=!!phone&&phone===candidatePhone;
+    const titleMatch=propertyDuplicateTokenSimilarity(property.title,candidate.title)>=0.6;
+    const regionMatch=propertyDuplicateTokenSimilarity(property.address,candidate.address)>=0.5;
+    const areaMatch=propertyDuplicateAreaMatch(property,candidate);
+    const priceMatch=propertyDuplicatePriceMatch(property,candidate);
+    const typeMatch=normalizePropertyDuplicateText(property.type)===normalizePropertyDuplicateText(candidate.type)&&!!property.type;
+    const score=(phoneMatch?4:0)+(titleMatch?2:0)+(regionMatch?1:0)+(areaMatch?1:0)+(priceMatch?1:0)+(typeMatch?1:0);
+    if(!phoneMatch&&score<4) return false;
+    const reasons=[];
+    if(phoneMatch) reasons.push('شماره مالک');
+    if(titleMatch) reasons.push('عنوان مشابه');
+    if(regionMatch) reasons.push('منطقه/آدرس نزدیک');
+    if(areaMatch) reasons.push('متراژ نزدیک');
+    if(priceMatch) reasons.push('قیمت نزدیک');
+    return {...candidate,_duplicateReasons:reasons};
+  }).filter(Boolean);
+}
+
+function renderPropertyDuplicateWarning(){
+  const box=document.getElementById('p-property-duplicate-warning');
+  if(!box) return [];
+  const draft=propertyDuplicateDraft();
+  const matches=findDuplicateProperties(draft);
+  if(!matches.length){ box.innerHTML=''; box.style.display='none'; return []; }
+  const rows=matches.slice(0,4).map(property=>`<li><strong>${escapeHTML(String(property.title||'ملک بدون عنوان').replace(/\s+/g,' ').slice(0,90))}</strong> — ${escapeHTML(property._duplicateReasons.join('، '))}</li>`).join('');
+  const more=matches.length>4?`<li>و ${toPersianDigits(String(matches.length-4))} مورد دیگر</li>`:'';
+  box.innerHTML=`⚠️ احتمال تکراری بودن این ملک وجود دارد. موارد مشابه بر اساس مالک/تلفن، عنوان، منطقه، متراژ و قیمت پیدا شد:<ul style="margin:5px 0 0;padding-right:20px;">${rows}${more}</ul><div style="margin-top:5px;color:var(--text3);">هیچ موردی خودکار حذف نمی‌شود؛ فقط در صورت اطمینان از تفاوت ملک، ذخیره را تأیید کنید.</div>`;
   box.style.display='block';
   return matches;
 }
@@ -5561,11 +5641,11 @@ function openEditProperty(id){
 
 async function saveProperty(){
   if(propertySaveInProgress) return;
-  const duplicateOwnerProperties=findDuplicatePropertiesByOwnerPhone(gVal('p-owner-phone'),editingPropertyId);
-  if(duplicateOwnerProperties.length){
-    const summary=duplicateOwnerProperties.slice(0,4).map(property=>`• ${String(property.title||'ملک بدون عنوان').replace(/\s+/g,' ').slice(0,80)}`).join('\n');
-    const more=duplicateOwnerProperties.length>4?`\nو ${toPersianDigits(String(duplicateOwnerProperties.length-4))} فایل دیگر`:'';
-    if(!confirm(`شماره تماس این مالک در ${toPersianDigits(String(duplicateOwnerProperties.length))} فایل دیگر ثبت شده است:\n${summary}${more}\nیک مالک ممکن است چند ملک داشته باشد؛ اگر مطمئن هستید این فایل جداگانه است، ذخیره ادامه یابد؟`)) return;
+  const duplicateProperties=renderPropertyDuplicateWarning();
+  if(duplicateProperties.length){
+    const summary=duplicateProperties.slice(0,4).map(property=>`• ${String(property.title||'ملک بدون عنوان').replace(/\s+/g,' ').slice(0,80)} — ${property._duplicateReasons.join('، ')}`).join('\n');
+    const more=duplicateProperties.length>4?`\nو ${toPersianDigits(String(duplicateProperties.length-4))} فایل دیگر`:'';
+    if(!confirm(`احتمال تکراری بودن ${toPersianDigits(String(duplicateProperties.length))} فایل پیدا شد:\n${summary}${more}\nاگر مطمئن هستید این ملک جداگانه است، ذخیره ادامه یابد؟`)) return;
   }
   const isCustomer = currentUser?.role === 'customer';
   let title = document.getElementById('p-title').value.trim();
