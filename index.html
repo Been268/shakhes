@@ -2877,7 +2877,7 @@ function escapeHTML(value){
 }
 function safeRawURL(value){
   const url = String(value ?? '').trim();
-  return /^(https?:|data:image\/)/i.test(url) ? url : '';
+  return /^(https?:|data:image\/(?:jpeg|png|webp|gif);base64,)/i.test(url) ? url : '';
 }
 function safeURL(value){
   return escapeHTML(safeRawURL(value));
