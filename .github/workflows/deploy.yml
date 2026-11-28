@@ -34,16 +34,10 @@ jobs:
           cp manifest.webmanifest sw.js manus-routes.json dist/
           cp -r icons dist/icons
 
-      - name: Package Pages artifact
-        run: tar --format=ustar -czf github-pages.tar.gz -C dist .
-
       - name: Upload Pages artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-pages-artifact@v4
         with:
-          name: github-pages
-          path: github-pages.tar.gz
-          if-no-files-found: error
-          retention-days: 1
+          path: dist
 
       - name: Deploy to GitHub Pages
         id: deployment
