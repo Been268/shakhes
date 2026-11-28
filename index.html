@@ -5176,6 +5176,34 @@ async function deletePropertyPrivateDocument(path,name){
   }
 }
 
+async function listAllPropertyPrivateDocuments(folder){
+  const documents=[];
+  const storage=_supabase.storage.from(PROPERTY_PRIVATE_DOCUMENT_BUCKET);
+  for(let offset=0;offset<=1000;offset+=100){
+    const result=await storage.list(folder,{limit:100,offset,sortBy:{column:'name',order:'asc'}});
+    if(result.error) throw result.error;
+    const batch=(result.data||[]).filter(item=>item&&item.id&&item.name);
+    documents.push(...batch);
+    if(batch.length<100) break;
+  }
+  return documents;
+}
+
+async function cleanupPropertyPrivateDocuments(folder,documents,propertyId){
+  if(!canManagePrivatePropertyDocuments()||!folder||!Array.isArray(documents)||!documents.length) return {removed:0,failed:0};
+  const storage=_supabase.storage.from(PROPERTY_PRIVATE_DOCUMENT_BUCKET);
+  let removed=0;
+  let failed=0;
+  for(let offset=0;offset<documents.length;offset+=100){
+    const chunk=documents.slice(offset,offset+100);
+    const result=await storage.remove(chunk.map(item=>`${folder}/${item.name}`));
+    if(result.error){ failed+=chunk.length; continue; }
+    removed+=chunk.length;
+    for(const item of chunk) await auditPrivatePropertyDocument(propertyId,'delete_private_document',item.name);
+  }
+  return {removed,failed};
+}
+
 function openPropertyDetails(id){
   const p = state.properties.find(x => String(x.id) === String(id));
   if(!p) return;
@@ -6056,6 +6084,19 @@ async function deleteProp(id){
       return;
     }
     if(!confirm('آیا از حذف این ملک مطمئن هستید؟')) return;
+    let privateFolder='';
+    let privateDocuments=[];
+    if(prop && isAdmin && canManagePrivatePropertyDocuments()){
+      try {
+        privateFolder=await propertyPrivateDocumentFolder(prop);
+        privateDocuments=privateFolder?await listAllPropertyPrivateDocuments(privateFolder):[];
+      } catch(error){
+        console.warn('Could not verify private property documents before deletion:',error);
+        notify('مدارک خصوصی این ملک بررسی نشد؛ حذف متوقف شد تا فایل محرمانه‌ای باقی نماند.','var(--red)');
+        return;
+      }
+      if(privateDocuments.length && !confirm(`این ملک ${toPersianDigits(String(privateDocuments.length))} مدرک خصوصی دارد. پس از حذف ملک، این مدارک نیز به‌صورت دائمی حذف می‌شوند؛ ادامه می‌دهید؟`)) return;
+    }
     // حذف تصاویر از Storage
     if(prop && prop.images){
       for(const img of prop.images){
@@ -6067,10 +6108,13 @@ async function deleteProp(id){
     if(!prop){ notify('ملک پیدا نشد','var(--red)'); return; }
     const ownerUid=prop._uid||prop.userId||currentUser.id;
     await deleteRecordToOwner('properties',id,ownerUid);
+    let privateCleanup={removed:0,failed:0};
+    if(privateFolder&&privateDocuments.length) privateCleanup=await cleanupPropertyPrivateDocuments(privateFolder,privateDocuments,id);
     state.properties = state.properties.filter(p=>!sameId(p.id, id));
     renderProperties(); updateCounts();
-    notify('ملک حذف شد','var(--red)');
-  } catch(e){ notify('خطا در حذف','var(--red)'); }
+    if(privateCleanup.failed) notify(`ملک حذف شد، اما ${toPersianDigits(String(privateCleanup.failed))} مدرک خصوصی پاک نشد؛ مدیر فعال باید پاک‌سازی مخزن را بررسی کند.`,'var(--red)');
+    else notify('ملک و مدارک خصوصی آن حذف شد','var(--red)');
+  } catch(e){ notify('خطا در حذف؛ تغییری در وضعیت ملک ثبت نشد','var(--red)'); }
 }
 
 // --- CLIENTS ---
