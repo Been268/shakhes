@@ -1064,6 +1064,14 @@ function profileRef(id){
   .pwa-install-btn, .pwa-install-dismiss { border: 0; font-family: inherit; cursor: pointer; }
   .pwa-install-btn { padding: 9px 12px; border-radius: 10px; background: var(--accent); color: #111; font-weight: 800; font-size: 11px; white-space: nowrap; }
   .pwa-install-dismiss { padding: 6px; background: transparent; color: var(--text3); font-size: 16px; }
+  .pwa-install-menu-btn { display:none; padding:7px 11px; border:1px solid rgba(232,168,56,.45); border-radius:9px; background:rgba(232,168,56,.12); color:var(--accent); font-family:inherit; font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap; }
+  .pwa-install-menu-btn.show { display:inline-flex; align-items:center; gap:5px; }
+  .pwa-install-help { position:fixed; inset:0; z-index:1400; display:none; align-items:center; justify-content:center; padding:18px; background:rgba(0,0,0,.68); }
+  .pwa-install-help.show { display:flex; }
+  .pwa-install-help-card { width:100%; max-width:390px; padding:22px; border:1px solid var(--border); border-radius:16px; background:var(--surface); box-shadow:var(--shadow); }
+  .pwa-install-help-card h3 { margin:0 0 12px; font-size:16px; }
+  .pwa-install-help-card p { margin:8px 0; color:var(--text2); font-size:12px; line-height:1.8; }
+  .pwa-install-help-card strong { color:var(--accent); }
   .pwa-offline-bar { position: fixed; top: 0; right: 0; left: 0; z-index: 1300; display:none; padding: 7px 12px; text-align:center; background:#8d2f2f; color:#fff; font-size:11px; }
   .pwa-offline-bar.show { display:block; }
   @keyframes pwaBannerIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -1078,6 +1086,13 @@ function profileRef(id){
   <div class="pwa-install-copy"><strong>املاک شاخص را نصب کنید</strong><span>دسترسی سریع‌تر و اجرای تمام‌صفحه روی موبایل</span></div>
   <button class="pwa-install-btn" id="pwa-install-btn" type="button">نصب</button>
   <button class="pwa-install-dismiss" id="pwa-install-dismiss" type="button" aria-label="بستن">×</button>
+</div>
+<div class="pwa-install-help" id="pwa-install-help" role="dialog" aria-modal="true" aria-labelledby="pwa-install-help-title">
+  <div class="pwa-install-help-card">
+    <h3 id="pwa-install-help-title">📲 افزودن املاک شاخص به صفحه اصلی</h3>
+    <div id="pwa-install-help-content"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:16px;"><button class="btn btn-ghost btn-sm" id="pwa-install-help-close" type="button">بستن</button></div>
+  </div>
 </div>
 <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeMobileMenu()"></div>
 
@@ -1318,6 +1333,7 @@ function profileRef(id){
     <div>
       <div class="topbar-title" id="page-title">داشبورد اصلی</div>
     </div>
+    <button class="pwa-install-menu-btn" id="pwa-install-menu-btn" type="button">📲 افزودن به صفحه اصلی</button>
   </div>
 
   <div class="content">
@@ -8714,18 +8730,49 @@ data.forEach(function(d){L.marker([d[0],d[1]]).addTo(map).bindPopup(d[2]);});
   const banner = document.getElementById('pwa-install-banner');
   const installBtn = document.getElementById('pwa-install-btn');
   const dismissBtn = document.getElementById('pwa-install-dismiss');
+  const menuBtn = document.getElementById('pwa-install-menu-btn');
+  const help = document.getElementById('pwa-install-help');
+  const helpContent = document.getElementById('pwa-install-help-content');
+  const helpClose = document.getElementById('pwa-install-help-close');
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isAndroid = /android/i.test(navigator.userAgent);
+  const updateInstallOption = () => {
+    if (isStandalone) { menuBtn?.classList.remove('show'); return; }
+    menuBtn?.classList.add('show');
+  };
+  const showInstallHelp = () => {
+    if (!helpContent || !help) return;
+    helpContent.innerHTML = isIos
+      ? '<p>در مرورگر <strong>Safari</strong> روی دکمهٔ <strong>اشتراک‌گذاری</strong> بزنید، سپس گزینهٔ <strong>Add to Home Screen / افزودن به صفحه اصلی</strong> را انتخاب کنید.</p>'
+      : isAndroid
+        ? '<p>در Chrome روی منوی <strong>⋮</strong> بزنید و گزینهٔ <strong>Install app / نصب برنامه</strong> یا <strong>Add to Home screen / افزودن به صفحه اصلی</strong> را انتخاب کنید.</p>'
+        : '<p>از منوی مرورگر گزینهٔ <strong>Install app</strong> یا <strong>Add to Home screen</strong> را انتخاب کنید. در موبایل، این گزینه معمولاً داخل منوی اشتراک‌گذاری یا منوی سه‌نقطه است.</p>';
+    help.classList.add('show');
+  };
+  const closeInstallHelp = () => help?.classList.remove('show');
+  const openInstallFlow = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      await deferredPrompt.userChoice;
+      deferredPrompt = null;
+      banner?.classList.remove('show');
+      updateInstallOption();
+      return;
+    }
+    showInstallHelp();
+  };
+  updateInstallOption();
   window.addEventListener('beforeinstallprompt', event => {
     event.preventDefault(); deferredPrompt = event;
     if (!isStandalone && sessionStorage.getItem('shakhes-install-dismissed') !== '1') banner?.classList.add('show');
+    updateInstallOption();
   });
-  installBtn?.addEventListener('click', async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    await deferredPrompt.userChoice;
-    deferredPrompt = null; banner?.classList.remove('show');
-  });
+  installBtn?.addEventListener('click', openInstallFlow);
+  menuBtn?.addEventListener('click', openInstallFlow);
   dismissBtn?.addEventListener('click', () => { sessionStorage.setItem('shakhes-install-dismissed','1'); banner?.classList.remove('show'); });
-  window.addEventListener('appinstalled', () => { banner?.classList.remove('show'); deferredPrompt = null; });
+  helpClose?.addEventListener('click', closeInstallHelp);
+  help?.addEventListener('click', event => { if (event.target === help) closeInstallHelp(); });
+  window.addEventListener('appinstalled', () => { banner?.classList.remove('show'); deferredPrompt = null; menuBtn?.classList.remove('show'); closeInstallHelp(); });
   const offlineBar = document.getElementById('pwa-offline-bar');
   const syncConnection = () => offlineBar?.classList.toggle('show', !navigator.onLine);
   window.addEventListener('online', syncConnection); window.addEventListener('offline', syncConnection); syncConnection();
