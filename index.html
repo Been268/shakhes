@@ -7597,55 +7597,97 @@ function matchProperties(clientId) {
     return;
   }
 
-  // الگوریتم امتیازدهی هوشمند
+  // الگوریتم امتیازدهی بر اساس نوع، بودجه، متراژ و منطقهٔ ثبت‌شدهٔ مشتری
+  var clientRequest = String(client.request || '').trim();
+  var clientFields = client.dynFields || {};
+  var clientType = String(clientFields['prop-type'] || '').trim();
+  var clientRegion = String(client.area || '').trim();
+  var legacyArea = /^\s*[\d۰-۹٠-٩][\d۰-۹٠-٩,٬،.\s]*\s*$/.test(clientRegion) ? toNumber(clientRegion) : 0;
+  var clientAreaMin = toNumber(clientFields['area-min']) || legacyArea;
+  var clientAreaMax = toNumber(clientFields['area-max']);
   var clientBudget = toNumber(client.budget);
-  var clientArea   = toNumber(client.area);
-  var clientType   = (client.request || '').toLowerCase();
+  var clientRentMax = toNumber(clientFields['rent-max']);
+  var clientDepositMax = toNumber(clientFields['deposit-max']);
+  var requestStatuses = {
+    'خرید': new Set(['sale','presale']), 'فروش': new Set(['sale','presale']),
+    'اجاره': new Set(['rent','rent_mortgage']), 'رهن': new Set(['mortgage','rent_mortgage']),
+    'رهن و اجاره': new Set(['rent_mortgage']), 'مشارکت در ساخت': new Set(['partnership','in_progress'])
+  };
+  var desiredStatuses = requestStatuses[clientRequest] || new Set();
 
   var scored = props.map(function(p) {
     var score = 0;
     var reasons = [];
+    var limitations = [];
 
-    // ۱. تطبیق نوع ملک (۳۰ امتیاز)
-    var propType = (p.type || '').toLowerCase();
-    if (clientType && propType.includes(clientType)) {
-      score += 30; reasons.push('نوع ملک مطابقت دارد');
+    // ۱. تطبیق نوع ملک (۲۵ امتیاز)
+    var propType = String(p.type || '').trim();
+    if (clientType && propType === clientType) {
+      score += 25; reasons.push('نوع ملک مطابقت دارد');
     } else if (!clientType) {
-      score += 15;
+      score += 12; limitations.push('نوع ملک مشتری ثبت نشده');
     }
 
-    // ۲. تطبیق بودجه (۴۰ امتیاز)
-    var propPrice = toNumber(p.price || p.mortgage || '0');
-    if (clientBudget > 0 && propPrice > 0) {
-      var ratio = propPrice / clientBudget;
-      if (ratio <= 1.0) { score += 40; reasons.push('قیمت در محدوده بودجه'); }
-      else if (ratio <= 1.1) { score += 30; reasons.push('قیمت کمی بالاتر از بودجه'); }
-      else if (ratio <= 1.25) { score += 15; reasons.push('قیمت بالاتر از بودجه'); }
-      else { score += 0; reasons.push('قیمت خارج از بودجه'); }
+    // ۲. تطبیق بودجه (۳۵ امتیاز به‌همراه سقف ودیعه در اجاره)
+    var propPrice = (clientRequest === 'اجاره' || clientRequest === 'رهن و اجاره') ? toNumber(p.rent) : clientRequest === 'رهن' ? toNumber(p.mortgage) : getPropPrice(p);
+    var budgetLimit = clientRequest === 'اجاره' || clientRequest === 'رهن و اجاره' ? clientRentMax : clientBudget;
+    var budgetLabel = clientRequest === 'اجاره' || clientRequest === 'رهن و اجاره' ? 'اجاره ماهیانه' : 'قیمت/مبلغ';
+    if (budgetLimit > 0 && propPrice > 0) {
+      var ratio = propPrice / budgetLimit;
+      if (ratio <= 1.0) { score += 25; reasons.push(`${budgetLabel} در محدوده بودجه`); }
+      else if (ratio <= 1.1) { score += 18; reasons.push(`${budgetLabel} کمی بالاتر از بودجه`); }
+      else if (ratio <= 1.25) { score += 9; reasons.push(`${budgetLabel} بالاتر از بودجه`); }
+      else { reasons.push(`${budgetLabel} خارج از بودجه`); }
+    } else if (budgetLimit <= 0) {
+      score += 12; limitations.push('بودجه ثبت نشده');
     } else {
-      score += 20;
+      limitations.push('قیمت ملک ثبت نشده');
+    }
+    if ((clientRequest === 'اجاره' || clientRequest === 'رهن و اجاره') && clientDepositMax > 0 && toNumber(p.mortgage) > 0) {
+      if (toNumber(p.mortgage) <= clientDepositMax) { score += 10; reasons.push('رهن/ودیعه در محدوده'); }
+      else limitations.push('رهن/ودیعه بالاتر از سقف مشتری');
+    } else if ((clientRequest === 'اجاره' || clientRequest === 'رهن و اجاره') && clientDepositMax <= 0) {
+      limitations.push('سقف ودیعه ثبت نشده');
     }
 
     // ۳. تطبیق متراژ (۲۰ امتیاز)
     var propArea = getPropArea(p);
-    if (clientArea > 0 && propArea > 0) {
-      var areaRatio = propArea / clientArea;
-      if (areaRatio >= 0.9 && areaRatio <= 1.2) { score += 20; reasons.push('متراژ مناسب'); }
-      else if (areaRatio >= 0.7 && areaRatio <= 1.5) { score += 10; reasons.push('متراژ قابل قبول'); }
+    if (clientAreaMin > 0 && propArea > 0) {
+      var areaMinMatch = propArea >= clientAreaMin;
+      var areaMaxMatch = !clientAreaMax || propArea <= clientAreaMax;
+      if (areaMinMatch && areaMaxMatch) { score += 20; reasons.push('متراژ در محدوده'); }
+      else if (areaMinMatch || areaMaxMatch) { score += 10; reasons.push('متراژ نزدیک به محدوده'); }
+      else limitations.push('متراژ خارج از محدوده مشتری');
+    } else if (clientAreaMin <= 0) {
+      score += 10; limitations.push('محدوده متراژ ثبت نشده');
     } else {
-      score += 10;
+      limitations.push('متراژ ملک ثبت نشده');
     }
 
-    // ۴. وضعیت ملک (۱۰ امتیاز)
-    var statusMap = {sale:'فروش',rent:'اجاره',mortgage:'رهن',rent_mortgage:'رهن و اجاره',presale:'پیش فروش',partnership:'مشارکت'};
-    if (p.status && p.status !== 'sold' && p.status !== 'rented') {
-      score += 10;
+    // ۴. تطبیق منطقه (۱۵ امتیاز)
+    if (clientRegion && !legacyArea && p.address) {
+      var regionSimilarity = propertyDuplicateTokenSimilarity(clientRegion, p.address);
+      if (regionSimilarity >= 0.5 || normalizePropertyDuplicateText(p.address).includes(normalizePropertyDuplicateText(clientRegion))) {
+        score += 15; reasons.push('منطقه/محله مطابقت دارد');
+      } else if (regionSimilarity > 0) {
+        score += 7; reasons.push('بخشی از منطقه مشابه است');
+      } else {
+        limitations.push('منطقه ملک با درخواست مشتری هم‌خوان نیست');
+      }
+    } else {
+      score += 7; limitations.push('منطقه مشتری یا ملک ثبت نشده');
     }
+
+    // ۵. سازگاری وضعیت درخواست با وضعیت فایل (۵ امتیاز)
+    if (desiredStatuses.size && desiredStatuses.has(p.status)) { score += 5; reasons.push('وضعیت معامله سازگار است'); }
+    else if (!desiredStatuses.size) { score += 3; limitations.push('نوع درخواست برای فیلتر وضعیت کافی نیست'); }
+    else limitations.push('وضعیت معامله با درخواست مشتری متفاوت است');
 
     return {
       prop: p,
       score: Math.min(score, 100),
-      reason: reasons.join(' | ') || 'ملک موجود و فعال'
+      reason: reasons.join(' | ') || 'ملک فعال است',
+      limitations
     };
   });
 
@@ -7676,6 +7718,7 @@ function matchProperties(clientId) {
       '<div style="font-size:12px;opacity:.7;margin-bottom:6px;">' + escapeHTML(p.type||'—') + ' | ' + escapeHTML(areaStr) + '</div>' +
       '<div style="font-size:12px;margin-bottom:6px;">' + propertyPriceHTML(p) + '</div>' +
       '<div style="font-size:12px;color:' + scoreColor + ';">✓ ' + escapeHTML(item.reason) + '</div>' +
+      (item.limitations.length ? '<div style="font-size:10px;color:var(--text3);margin-top:5px;">محدودیت داده: ' + escapeHTML(item.limitations.join('، ')) + '</div>' : '') +
       '</div></div>';
   });
 
