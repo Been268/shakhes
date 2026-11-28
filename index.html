@@ -1410,11 +1410,11 @@ function profileRef(id){
             </div>
             <div class="form-group">
               <label>قیمت از (تومان)</label>
-              <input type="number" id="filter-price-min" placeholder="حداقل" oninput="renderProperties()">
+              <input type="text" inputmode="numeric" id="filter-price-min" placeholder="حداقل" autocomplete="off" oninput="renderProperties()">
             </div>
             <div class="form-group">
               <label>قیمت تا (تومان)</label>
-              <input type="number" id="filter-price-max" placeholder="حداکثر" oninput="renderProperties()">
+              <input type="text" inputmode="numeric" id="filter-price-max" placeholder="حداکثر" autocomplete="off" oninput="renderProperties()">
             </div>
             <div class="form-group">
               <label>متراژ از</label>
@@ -1548,7 +1548,7 @@ function profileRef(id){
             <div class="form-grid">
               <div class="form-group">
                 <label>قیمت ملک (تومان)</label>
-                <input type="number" id="calc-price" placeholder="مثال: 5000000000" oninput="calcCommission()">
+                <input type="text" inputmode="numeric" id="calc-price" placeholder="مثال: 5000000000" autocomplete="off" oninput="calcCommission()">
               </div>
               <div class="form-group">
                 <label>نوع معامله</label>
@@ -2318,11 +2318,11 @@ function profileRef(id){
       </div>
       <div class="form-group">
         <label>قیمت نهایی (تومان)</label>
-        <input type="number" id="d-price" placeholder="0">
+        <input type="text" inputmode="numeric" id="d-price" placeholder="0" autocomplete="off">
       </div>
       <div class="form-group">
         <label>کمیسیون دریافتی (تومان)</label>
-        <input type="number" id="d-commission" placeholder="0">
+        <input type="text" inputmode="numeric" id="d-commission" placeholder="0" autocomplete="off">
       </div>
       <div class="form-group">
         <label>نام مشاور</label>
@@ -4165,7 +4165,7 @@ function refreshMoneyWordInputs(root=document){
   if(root && root.matches && root.matches('input')) inputs.push(root);
   if(root && root.querySelectorAll) inputs.push(...root.querySelectorAll('input'));
   inputs.forEach(input=>{
-    if(PROPERTY_AMOUNT_IDS.has(input.id)) input.value=formatAmountForInput(input.value);
+    if(MONEY_INPUT_IDS.has(input.id)) input.value=formatAmountForInput(input.value);
     updateMoneyInputWords(input);
   });
 }
@@ -4173,12 +4173,12 @@ function refreshMoneyWordInputs(root=document){
 document.addEventListener('input', event => updateMoneyInputWords(event.target));
 document.addEventListener('focusin', event=>{
   const input=event.target;
-  if(!PROPERTY_AMOUNT_IDS.has(input?.id)) return;
+  if(!MONEY_INPUT_IDS.has(input?.id)) return;
   input.value=amountDigits(input.value);
 });
 document.addEventListener('focusout', event=>{
   const input=event.target;
-  if(!PROPERTY_AMOUNT_IDS.has(input?.id)) return;
+  if(!MONEY_INPUT_IDS.has(input?.id)) return;
   input.value=formatAmountForInput(input.value);
   updateMoneyInputWords(input);
 });
@@ -8713,7 +8713,7 @@ data.forEach(function(d){L.marker([d[0],d[1]]).addTo(map).bindPopup(d[2]);});
       </div>
       <div class="form-group">
         <label>مبلغ (تومان)</label>
-        <input type="number" id="inc-amount" placeholder="0">
+        <input type="text" inputmode="numeric" id="inc-amount" placeholder="0" autocomplete="off">
       </div>
       <div class="form-group full" style="grid-column:1/-1;">
         <label>عنوان</label>
@@ -8777,7 +8777,7 @@ data.forEach(function(d){L.marker([d[0],d[1]]).addTo(map).bindPopup(d[2]);});
       </div>
       <div class="form-group">
         <label>مبلغ نهایی (تومان)</label>
-        <input type="number" id="ct-final-price" placeholder="0">
+        <input type="text" inputmode="numeric" id="ct-final-price" placeholder="0" autocomplete="off">
       </div>
       <div class="form-group full" style="grid-column:1/-1;">
         <label>توضیحات و شرایط اضافه</label>
